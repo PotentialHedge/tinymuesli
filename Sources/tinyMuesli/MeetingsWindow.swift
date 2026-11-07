@@ -310,6 +310,8 @@ private struct ChatView: View {
     @State private var modified: Date?
     /// Index into `matchIDs` of the match scrolled to.
     @State private var currentMatch = 0
+    /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
+    @AppStorage("chatSpeakerColors") private var speakerColors = false
 
     private var isLive: Bool {
         guard let status = transcript.metadata?.status else { return false }
@@ -407,6 +409,12 @@ private struct ChatView: View {
                 }
             }
             ToolbarItem {
+                Toggle(isOn: $speakerColors) {
+                    Label("Color Speakers", systemImage: "paintpalette")
+                }
+                .help(speakerColors ? "Show everyone else in grey" : "Give each speaker their own colour")
+            }
+            ToolbarItem {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
                 } label: {
@@ -468,6 +476,7 @@ private struct ChatView: View {
 
     private func color(for speaker: String) -> Color {
         if speaker == SpeakerLabel.me { return .accentColor }
+        guard speakerColors else { return .gray }
         let palette: [Color] = [.orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .cyan, .red]
         let others = transcript.speakers.filter { $0 != SpeakerLabel.me }
         let index = others.firstIndex(of: speaker) ?? 0
@@ -495,13 +504,14 @@ private struct Bubble: View {
     let showsSpeakerName: Bool
     let highlight: String
     let isCurrentMatch: Bool
+    @State private var isHovering = false
 
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
             if startsGroup, showsSpeakerName {
                 Text(message.speaker)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(message.isMe ? Color.secondary : color)
+                    .foregroundStyle(color == .gray ? Color.secondary : color)
                     .padding(.horizontal, 12)
             }
             HStack(alignment: .bottom, spacing: 6) {
@@ -520,14 +530,20 @@ private struct Bubble: View {
         }
         .frame(maxWidth: .infinity, alignment: message.isMe ? .trailing : .leading)
         .padding(.top, startsGroup ? 10 : 3)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
+        }
     }
 
-    /// The position in the recording, small next to the bubble.
+    /// The position in the recording, small next to the bubble. Only while the pointer is on the
+    /// message; it keeps its space, so bubbles don't move.
     private var time: some View {
         Text(TranscriptRenderer.timestamp(message.start))
             .font(.caption2.monospacedDigit())
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .padding(.bottom, 4)
+            .opacity(isHovering ? 1 : 0)
     }
 
     private var attributed: AttributedString {
