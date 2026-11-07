@@ -1,6 +1,7 @@
 import Foundation
 
-/// A read-only MCP server over the meeting files: one JSON-RPC message per line on stdin and stdout.
+/// An MCP server over the meeting files. It reads transcripts, and can set a meeting's title,
+/// tags and speaker names (nothing else is ever changed or deleted): one JSON-RPC message per line on stdin and stdout.
 ///
 /// Written by hand because a few dozen lines of JSON don't justify a dependency in an app that
 /// counts its megabytes. It has tools only, no prompts or resources.
@@ -84,6 +85,7 @@ public final class MCPServer {
                 "protocolVersion": Self.protocolVersions.contains(requested) ? requested : Self.protocolVersions[0],
                 "capabilities": ["tools": [String: Any]()],
                 "serverInfo": ["name": "tinymuesli", "version": version],
+                "instructions": Self.instructions,
             ]
         case "ping":
             return [:]
@@ -119,7 +121,7 @@ public final class MCPServer {
                 throw ToolError(message: "query is required")
             }
             return try json(library.search(query, limit: arguments["limit"] as? Int ?? 20))
-        default:  // get_transcript
+        case "get_transcript":
             guard let id = arguments["meeting"] as? String else { throw ToolError(message: "meeting is required") }
             guard let folder = library.folder(id: id) else {
                 throw ToolError(message: "No meeting with id \"\(id)\". list_meetings gives the ids.")
@@ -130,8 +132,80 @@ public final class MCPServer {
             guard let text = try? String(contentsOf: folder.appendingPathComponent(file), encoding: .utf8) else {
                 throw ToolError(message: "\(file) doesn't exist for this meeting yet. It's written when the final pass finishes; markdown is available during the meeting.")
             }
-            return text
+            // JSON stays parseable; the markdown gets a note about what's missing.
+            guard format == "markdown" else { return text }
+            return text + (Self.curationNote(folder: folder, id: id, library: library).map { "\n\n---\n" + $0 } ?? "")
+        case "update_meeting":
+            guard let id = arguments["meeting"] as? String else { throw ToolError(message: "meeting is required") }
+            guard let folder = library.folder(id: id), let summary = library.summary(of: folder) else {
+                throw ToolError(message: "No meeting with id \"\(id)\". list_meetings gives the ids.")
+            }
+            let editor = MeetingEditor(folder: folder)
+            let speakers = arguments["speakers"] as? [String: Any] ?? [:]
+            for old in speakers.keys where !summary.speakers.contains(old) {
+                throw ToolError(message: "This meeting has no speaker \"\(old)\". Its speakers are: \(summary.speakers.joined(separator: ", ")).")
+            }
+            do {
+                if let title = arguments["title"] as? String { try editor.setTitle(title) }
+                if let tags = arguments["tags"] as? [String] { try editor.setTags(tags) }
+                for (old, new) in speakers.sorted(by: { $0.key < $1.key }) {
+                    guard let new = new as? String else { throw ToolError(message: "Speaker names must be strings.") }
+                    try editor.rename(speaker: old, to: new)
+                }
+            } catch let error as MeetingEditor.EditError {
+                throw ToolError(message: error.localizedDescription)
+            }
+            return try json(library.summary(of: folder))
+        default:
+            throw ToolError(message: "Unknown tool \(tool)")
         }
+    }
+
+    /// Asks the agent to fill in what's missing: a title, tags, names for "Speaker n". Voices
+    /// recognised from other meetings and names already in use are listed, so names stay consistent.
+    static func curationNote(folder: URL, id: String, library: MeetingLibrary) -> String? {
+        guard let summary = library.summary(of: folder), summary.status == "done" else { return nil }
+        let unnamed = summary.speakers.filter(VoiceMatcher.isPlaceholder)
+        var missing: [String] = []
+        if summary.title == nil { missing.append("a title") }
+        if summary.tags.isEmpty { missing.append("tags") }
+        if !unnamed.isEmpty { missing.append("names for \(unnamed.joined(separator: ", "))") }
+        guard !missing.isEmpty else { return nil }
+
+        let list = missing.count > 1 ? missing.dropLast().joined(separator: ", ") + " and " + missing.last! : missing[0]
+        var lines = ["Note from tinyMuesli: this meeting is missing \(list). "
+            + "If the transcript or the user makes them clear, set them with update_meeting(meeting: \"\(id)\", …), "
+            + "and tell the user what you set. Only name a speaker when you're confident (people often name each other in greetings); otherwise ask the user."]
+        let suggestions = VoiceMatcher(store: library.store).suggestions(for: folder)
+        if !suggestions.isEmpty {
+            lines.append("Voices recognised from earlier meetings: " + suggestions.map {
+                "\($0.speaker) sounds like \($0.name) (\(Int(($0.similarity * 100).rounded()))% match)"
+            }.joined(separator: "; ") + ".")
+        }
+        let names = knownNames(library: library)
+        if !unnamed.isEmpty, !names.isEmpty {
+            lines.append("Names used in other meetings (reuse the same spelling): \(names.prefix(30).joined(separator: ", ")).")
+        }
+        let tags = knownTags(library: library)
+        if summary.tags.isEmpty, !tags.isEmpty {
+            lines.append("Tags in use (prefer these): \(tags.prefix(30).joined(separator: ", ")).")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Speaker names given in any meeting, most frequent first.
+    public static func knownNames(library: MeetingLibrary) -> [String] {
+        ranked(library.meetings().flatMap { $0.speakers.filter { $0 != SpeakerLabel.me && !VoiceMatcher.isPlaceholder($0) } })
+    }
+
+    public static func knownTags(library: MeetingLibrary) -> [String] {
+        ranked(library.meetings().flatMap(\.tags))
+    }
+
+    private static func ranked(_ values: [String]) -> [String] {
+        var counts: [String: Int] = [:]
+        for value in values { counts[value, default: 0] += 1 }
+        return counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
     }
 
     private func json(_ value: some Encodable) throws -> String {
@@ -147,8 +221,17 @@ public final class MCPServer {
         return String(decoding: data, as: UTF8.self)
     }
 
+    static let instructions = """
+        tinyMuesli records and transcribes the user's meetings on their Mac. Each meeting has a title, tags \
+        and speaker names, which start out empty ("Speaker 1", "Speaker 2"…; "Me" is the user). Whenever you \
+        read a meeting and can tell what it was about or who spoke, fill them in with update_meeting: a short \
+        title, a few lowercase tags (reuse existing ones), and real names for the speakers. Names you set \
+        let tinyMuesli recognise those voices in later meetings. Only name people you're confident about, \
+        and tell the user what you changed.
+        """
+
     nonisolated(unsafe) private static let tools: [[String: Any]] = [
-        tool("list_meetings", "List recorded meetings, most recent first, with their id, time, app, speakers and status. A status of \"recording\" means the meeting is in progress.", properties: [
+        tool("list_meetings", "List recorded meetings, most recent first, with their id, time, title, app, tags, speakers and status. A status of \"recording\" means the meeting is in progress.", properties: [
             "limit": ["type": "integer", "description": "How many to return (default 20)"],
         ]),
         tool("get_transcript", "Read a meeting's transcript. While a meeting is in progress, markdown is available and remote speech is labelled \"Others\".", properties: [
@@ -159,14 +242,22 @@ public final class MCPServer {
             "query": ["type": "string", "description": "Text to find"],
             "limit": ["type": "integer", "description": "How many matches to return (default 20)"],
         ], required: ["query"]),
+        tool("update_meeting", "Set a finished meeting's title, tags and speaker names. Do this whenever you've read a meeting and can tell what it was about or who the speakers are, and tell the user what you set. Names are written into the transcript, and named voices are recognised in later meetings. Renaming two speakers to the same name merges them.", properties: [
+            "meeting": ["type": "string", "description": "Meeting id from list_meetings"],
+            "title": ["type": "string", "description": "A short title, e.g. \"Q4 roadmap with Ann\". An empty string removes it."],
+            "tags": ["type": "array", "items": ["type": "string"], "description": "Replaces the tags. Short and lowercase, e.g. [\"roadmap\", \"acme\"]; reuse tags from other meetings."],
+            "speakers": ["type": "object", "additionalProperties": ["type": "string"], "description": "Current name to new name, e.g. {\"Speaker 1\": \"Ann Lee\"}. \"Me\" can't be renamed."],
+        ], required: ["meeting"], readOnly: false),
     ]
 
-    private static func tool(_ name: String, _ description: String, properties: [String: Any], required: [String] = []) -> [String: Any] {
+    private static func tool(_ name: String, _ description: String, properties: [String: Any], required: [String] = [],
+                             readOnly: Bool = true) -> [String: Any] {
         [
             "name": name,
             "description": description,
             "inputSchema": ["type": "object", "properties": properties, "required": required],
-            "annotations": ["readOnlyHint": true],
+            "annotations": readOnly ? ["readOnlyHint": true]
+                : ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true],
         ]
     }
 }

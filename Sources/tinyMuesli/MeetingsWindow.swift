@@ -19,6 +19,7 @@ final class MeetingBrowser {
         let speakers: [String]
         let preview: String?
         let app: String?
+        let tags: [String]
     }
 
     /// A meeting found by the search in the sidebar.
@@ -62,10 +63,10 @@ final class MeetingBrowser {
                     ?? MeetingProcessor.body(of: folder.appendingPathComponent(MeetingFiles.transcript))
                 newCache[folder] = (modified, preview, body)
                 entries.append(Entry(
-                    folder: folder, name: MeetingStore.displayName(of: folder, start: summary.start),
+                    folder: folder, name: summary.title ?? MeetingStore.displayName(of: folder, start: summary.start),
                     start: summary.start, end: summary.end,
                     status: MeetingMetadata.Status(rawValue: summary.status) ?? .done,
-                    speakers: summary.speakers, preview: preview, app: summary.app
+                    speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags
                 ))
             }
             await MainActor.run {
@@ -91,7 +92,7 @@ final class MeetingBrowser {
             var found: [URL: Match] = [:]
             for entry in entries {
                 let inText = ChatTranscript.matches(in: bodies[entry.folder] ?? "", query: query)
-                let inName = ([entry.name, entry.app ?? ""] + entry.speakers).contains {
+                let inName = ([entry.name, entry.app ?? ""] + entry.speakers + entry.tags).contains {
                     $0.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 }
                 if inText.count > 0 || inName { found[entry.folder] = Match(count: inText.count, excerpt: inText.excerpt) }
@@ -156,7 +157,9 @@ struct MeetingsWindow: View {
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
         } detail: {
             if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
-                ChatView(folder: folder, highlight: browser.matches == nil ? "" : browser.query)
+                ChatView(folder: folder, highlight: browser.matches == nil ? "" : browser.query,
+                         store: model.store, knownTags: knownTags, knownNames: knownNames,
+                         onEdited: { browser.reload(store: model.store) })
                     .id(folder)
                     .navigationTitle(entry.name)
                     .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
@@ -174,6 +177,24 @@ struct MeetingsWindow: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+    }
+
+    /// Speaker names given in any meeting, most used first.
+    private var knownNames: [String] {
+        Self.ranked(browser.entries.flatMap { $0.speakers.filter { $0 != SpeakerLabel.me && !VoiceMatcher.isPlaceholder($0) } })
+    }
+
+    private static func ranked(_ values: [String]) -> [String] {
+        var counts: [String: Int] = [:]
+        for value in values { counts[value, default: 0] += 1 }
+        return counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
+    }
+
+    /// Every tag in use, most used first.
+    private var knownTags: [String] {
+        var counts: [String: Int] = [:]
+        for tag in browser.entries.flatMap(\.tags) { counts[tag, default: 0] += 1 }
+        return counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
     }
 
     private func isOngoing(_ entry: MeetingBrowser.Entry) -> Bool {
@@ -219,6 +240,12 @@ private struct MeetingRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
+                if !entry.tags.isEmpty {
+                    Label(entry.tags.joined(separator: ", "), systemImage: "tag")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -306,8 +333,16 @@ private struct ChatView: View {
     let folder: URL
     /// The sidebar's search: highlighted, with buttons to step through the matches.
     let highlight: String
+    let store: MeetingStore
+    let knownTags: [String]
+    let knownNames: [String]
+    let onEdited: () -> Void
+    @AppStorage("meetingDetailsShown") private var showsDetails = false
     @State private var transcript = ChatTranscript(metadata: nil, messages: [])
     @State private var modified: Date?
+    /// Voices recognised from other meetings, for speakers that aren't named yet.
+    @State private var suggestions: [VoiceMatcher.Suggestion] = []
+    @State private var renameError: String?
     /// Index into `matchIDs` of the match scrolled to.
     @State private var currentMatch = 0
     /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
@@ -348,6 +383,8 @@ private struct ChatView: View {
                             color: color(for: message.speaker),
                             startsGroup: previous?.speaker != message.speaker || divider(before: message, previous: previous) != nil,
                             showsSpeakerName: !message.isMe && transcript.speakers.count > 1,
+                            suggestion: transcript.metadata?.status == .done ? suggestion(for: message.speaker) : nil,
+                            confirm: { rename(message.speaker, to: $0) },
                             highlight: query,
                             isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id
                         )
@@ -409,12 +446,6 @@ private struct ChatView: View {
                 }
             }
             ToolbarItem {
-                Toggle(isOn: $speakerColors) {
-                    Label("Color Speakers", systemImage: "paintpalette")
-                }
-                .help(speakerColors ? "Show everyone else in grey" : "Give each speaker their own colour")
-            }
-            ToolbarItem {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
                 } label: {
@@ -422,6 +453,35 @@ private struct ChatView: View {
                 }
                 .help("Show the transcript files in Finder")
             }
+            ToolbarItem {
+                Toggle(isOn: $showsDetails) {
+                    Label("Details", systemImage: "info.circle")
+                }
+                .help(showsDetails ? "Hide details" : "Show tags and speakers")
+                .keyboardShortcut("i", modifiers: .command)
+            }
+        }
+        .inspector(isPresented: $showsDetails) {
+            MeetingDetails(
+                folder: folder, transcript: transcript, suggestions: suggestions, knownTags: knownTags, knownNames: knownNames,
+                speakerColors: $speakerColors, color: color(for:),
+                onEdited: {
+                    reloadIfChanged(force: true)
+                    onEdited()
+                }
+            )
+            .inspectorColumnWidth(min: 240, ideal: 300, max: 400)
+        }
+        .task(id: "\(folder.path)|\(transcript.speakers.joined(separator: "|"))") {
+            let folder = folder, store = store
+            suggestions = await Task.detached(priority: .userInitiated) {
+                VoiceMatcher(store: store).suggestions(for: folder)
+            }.value
+        }
+        .alert("Couldn't Rename", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(renameError ?? "")
         }
         .task(id: folder) {
             // Reload when the transcript changes: it grows live while recording and is rewritten
@@ -441,7 +501,8 @@ private struct ChatView: View {
                 let details = [
                     metadata.app,
                     metadata.end.map { AppModel.length($0.timeIntervalSince(metadata.start)) },
-                    transcript.speakers.isEmpty ? nil : transcript.speakers.joined(separator: ", "),
+                    transcript.speakers.isEmpty ? nil
+                        : transcript.speakers.map { suggestion(for: $0).map { "Maybe \($0.name)" } ?? $0 }.joined(separator: ", "),
                 ].compactMap { $0 }
                 Text(details.joined(separator: " · "))
                     .font(.caption)
@@ -483,11 +544,26 @@ private struct ChatView: View {
         return palette[index % palette.count]
     }
 
-    private func reloadIfChanged() {
+    private func suggestion(for speaker: String) -> VoiceMatcher.Suggestion? {
+        suggestions.first { $0.speaker == speaker }
+    }
+
+    /// Confirming a "Maybe Ann" in the chat.
+    private func rename(_ speaker: String, to name: String) {
+        do {
+            try MeetingEditor(folder: folder).rename(speaker: speaker, to: name)
+        } catch {
+            renameError = error.localizedDescription
+        }
+        reloadIfChanged(force: true)
+        onEdited()
+    }
+
+    private func reloadIfChanged(force: Bool = false) {
         let urls = [MeetingFiles.transcript, MeetingFiles.json].map(folder.appendingPathComponent)
         let dates = urls.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
         let latest = dates.max()
-        guard latest != modified || transcript.metadata == nil else { return }
+        guard force || latest != modified || transcript.metadata == nil else { return }
         modified = latest
         let folder = folder
         Task.detached(priority: .userInitiated) {
@@ -502,6 +578,9 @@ private struct Bubble: View {
     let color: Color
     let startsGroup: Bool
     let showsSpeakerName: Bool
+    /// Shown as "Maybe Ann" with a button that confirms the name.
+    let suggestion: VoiceMatcher.Suggestion?
+    let confirm: (String) -> Void
     let highlight: String
     let isCurrentMatch: Bool
     @State private var isHovering = false
@@ -509,10 +588,21 @@ private struct Bubble: View {
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
             if startsGroup, showsSpeakerName {
-                Text(message.speaker)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(color == .gray ? Color.secondary : color)
-                    .padding(.horizontal, 12)
+                HStack(spacing: 6) {
+                    if let suggestion {
+                        Text("Maybe \(suggestion.name)")
+                            .help("The voice sounds like \(suggestion.name) from \(suggestion.meetings == 1 ? "another meeting" : "\(suggestion.meetings) other meetings"). This is \(message.speaker) until you confirm.")
+                        Button("Confirm") { confirm(suggestion.name) }
+                            .buttonStyle(.link)
+                            .foregroundStyle(.tint)
+                            .help("Name \(message.speaker) “\(suggestion.name)” in this meeting")
+                    } else {
+                        Text(message.speaker)
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color == .gray ? Color.secondary : color)
+                .padding(.horizontal, 12)
             }
             HStack(alignment: .bottom, spacing: 6) {
                 if message.isMe { Spacer(minLength: 60); time }

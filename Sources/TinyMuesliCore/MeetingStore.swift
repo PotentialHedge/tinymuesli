@@ -180,27 +180,35 @@ public struct MeetingMetadata: Sendable, Equatable {
 
     public var start: Date
     public var end: Date?
+    /// A name you (or an agent) gave the meeting. Without one it's called by its app.
+    public var title: String?
     public var app: String?
     public var status: Status
     public var language: String?
     public var speakers: [String]
+    /// Set in the Meetings window; kept when the final pass re-runs.
+    public var tags: [String]
     public var error: String?
 
-    public init(start: Date, end: Date? = nil, app: String?, status: Status, language: String? = nil,
-                speakers: [String] = [], error: String? = nil) {
+    public init(start: Date, end: Date? = nil, title: String? = nil, app: String?, status: Status, language: String? = nil,
+                speakers: [String] = [], tags: [String] = [], error: String? = nil) {
         self.start = start
         self.end = end
+        self.title = title
         self.app = app
         self.status = status
         self.language = language
         self.speakers = speakers
+        self.tags = tags
         self.error = error
     }
 
     public func frontmatter() -> String {
         let iso = ISO8601DateFormatter()
         iso.timeZone = .current
-        var lines = ["---", "date: \(iso.string(from: start))"]
+        var lines = ["---"]
+        if let title { lines.append("title: \(Self.yamlString(title))") }
+        lines.append("date: \(iso.string(from: start))")
         if let end {
             lines.append("end: \(iso.string(from: end))")
             lines.append("duration: \(Self.duration(end.timeIntervalSince(start)))")
@@ -208,6 +216,7 @@ public struct MeetingMetadata: Sendable, Equatable {
         if let app { lines.append("app: \(Self.yamlString(app))") }
         if let language { lines.append("language: \(language)") }
         if !speakers.isEmpty { lines.append("speakers: [\(speakers.map(Self.yamlString).joined(separator: ", "))]") }
+        if !tags.isEmpty { lines.append("tags: [\(tags.map(Self.yamlString).joined(separator: ", "))]") }
         lines.append("status: \(status.rawValue)")
         if let error { lines.append("error: \(Self.yamlString(error))") }
         lines.append("---")
@@ -229,16 +238,35 @@ public struct MeetingMetadata: Sendable, Equatable {
         guard let start = values["date"].flatMap(iso.date(from:)) else { return nil }
         self.start = start
         end = values["end"].flatMap(iso.date(from:))
+        title = values["title"].map(Self.unquote).flatMap { $0.isEmpty ? nil : $0 }
         app = values["app"].map(Self.unquote)
         status = values["status"].flatMap(Status.init(rawValue:)) ?? .recorded
         language = values["language"]
         error = values["error"].map(Self.unquote)
-        if let list = values["speakers"], list.hasPrefix("["), list.hasSuffix("]") {
-            speakers = list.dropFirst().dropLast().split(separator: ",")
-                .map { Self.unquote($0.trimmingCharacters(in: .whitespaces)) }
-        } else {
-            speakers = []
+        speakers = values["speakers"].map(Self.list) ?? []
+        tags = values["tags"].map(Self.list) ?? []
+    }
+
+    /// `[a, "b, c"]`: splits at commas outside quotes.
+    static func list(_ value: String) -> [String] {
+        guard value.hasPrefix("["), value.hasSuffix("]") else { return [] }
+        var items: [String] = []
+        var current = ""
+        var quoted = false
+        var escaped = false
+        for c in value.dropFirst().dropLast() {
+            if escaped { current.append(c); escaped = false; continue }
+            if c == "\\", quoted { current.append(c); escaped = true; continue }
+            if c == "\"" { quoted.toggle() }
+            if c == ",", !quoted {
+                items.append(current)
+                current = ""
+            } else {
+                current.append(c)
+            }
         }
+        items.append(current)
+        return items.map { unquote($0.trimmingCharacters(in: .whitespaces)) }.filter { !$0.isEmpty }
     }
 
     static func duration(_ seconds: TimeInterval) -> String {

@@ -123,10 +123,36 @@ private func makeLibrary() throws -> MeetingLibrary {
         #expect(code(try call(server, ["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": "nope"]])) == -32602)
     }
 
-    @Test func listsReadOnlyTools() throws {
+    @Test func listsTools() throws {
         let response = try call(try MCPServer(library: makeLibrary()), ["jsonrpc": "2.0", "id": 1, "method": "tools/list"])
         let tools = try #require((response["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.compactMap { $0["name"] as? String } == ["list_meetings", "get_transcript", "search_transcripts"])
+        #expect(tools.compactMap { $0["name"] as? String } == ["list_meetings", "get_transcript", "search_transcripts", "update_meeting"])
+        let readOnly = tools.map { ($0["annotations"] as? [String: Any])?["readOnlyHint"] as? Bool }
+        #expect(readOnly == [true, true, true, false])
+    }
+
+    @Test func asksTheAgentToNameWhatIsMissing() throws {
+        let server = MCPServer(library: try makeLibrary())
+        let id = "2026/11/2026-11-03 0900 Zoom"
+        let text = try callTool(server, "get_transcript", ["meeting": id]).text
+        #expect(text.contains("this meeting is missing a title, tags and names for Speaker 1."))
+        #expect(text.contains("update_meeting(meeting: \"\(id)\""))
+        // Not while it's still being recorded.
+        #expect(!(try callTool(server, "get_transcript", ["meeting": "2026/11/2026-11-04 1030 Zoom"]).text.contains("update_meeting")))
+    }
+
+    @Test func updatesTitleAndTags() throws {
+        let library = try makeLibrary()
+        let server = MCPServer(library: library)
+        let id = "2026/11/2026-11-03 0900 Zoom"
+        let result = try callTool(server, "update_meeting", ["meeting": id, "title": "Budget review", "tags": ["budget", "Budget", "q4"]])
+        #expect(!result.isError)
+        let summary = try #require(library.meetings().first { $0.id == id })
+        #expect(summary.title == "Budget review")
+        #expect(summary.tags == ["budget", "q4"])
+        #expect(!(try callTool(server, "get_transcript", ["meeting": id]).text.contains("a title")))
+        #expect(try callTool(server, "update_meeting", ["meeting": id, "speakers": ["Speaker 9": "Ann"]]).isError)
+        #expect(try callTool(server, "update_meeting", ["meeting": "2026/11/2026-11-04 1030 Zoom", "title": "x"]).isError)
     }
 
     @Test func toolsReadMeetings() throws {

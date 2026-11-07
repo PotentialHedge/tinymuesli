@@ -64,8 +64,9 @@ with audio retention on, or one whose transcription failed).
 
 ## Using it from an agent
 
-tinyMuesli has a read-only MCP server with the tools `list_meetings`, `get_transcript` and
-`search_transcripts`. The easiest way to set it up is "Copy Prompt for Agent" in the menu: paste the
+tinyMuesli has an MCP server with the tools `list_meetings`, `get_transcript`,
+`search_transcripts` and `update_meeting`. The last one lets your agent give a meeting a title and tags
+and name its speakers; it never changes or deletes anything else. The easiest way to set it up is "Copy Prompt for Agent" in the menu: paste the
 prompt into your agent, and it installs the server and learns how to use it. It contains this
 copy's path, so copy it again if you move the app.
 

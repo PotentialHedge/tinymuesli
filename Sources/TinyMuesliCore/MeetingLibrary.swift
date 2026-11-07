@@ -7,10 +7,13 @@ public struct MeetingSummary: Codable, Sendable, Equatable {
     public var path: String
     public var start: Date
     public var end: Date?
+    /// Only when one was set.
+    public var title: String?
     public var app: String?
     public var status: String
     public var language: String?
     public var speakers: [String]
+    public var tags: [String]
     public var error: String?
 }
 
@@ -47,8 +50,9 @@ public struct MeetingLibrary: Sendable {
               let metadata = MeetingMetadata(parsing: text)
         else { return nil }
         return MeetingSummary(
-            id: Self.id(of: folder), path: folder.path, start: metadata.start, end: metadata.end, app: metadata.app,
-            status: metadata.status.rawValue, language: metadata.language, speakers: metadata.speakers, error: metadata.error
+            id: Self.id(of: folder), path: folder.path, start: metadata.start, end: metadata.end, title: metadata.title, app: metadata.app,
+            status: metadata.status.rawValue, language: metadata.language, speakers: metadata.speakers,
+            tags: metadata.tags, error: metadata.error
         )
     }
 

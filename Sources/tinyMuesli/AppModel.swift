@@ -537,7 +537,7 @@ final class AppModel {
             let folder = URL(fileURLWithPath: meeting.path)
             if pendingDeletion.contains(where: { Self.samePath($0, folder) }) { continue }
             let day = Self.dayTitle(meeting.start, calendar: calendar)
-            let name = MeetingStore.displayName(of: folder, start: meeting.start, calendar: calendar)
+            let name = meeting.title ?? MeetingStore.displayName(of: folder, start: meeting.start, calendar: calendar)
             let entry = RecentMeeting(
                 folder: folder,
                 title: "\(meeting.start.formatted(date: .omitted, time: .shortened)) · \(name)",
