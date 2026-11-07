@@ -20,6 +20,7 @@ struct MeetingDetails: View {
 
     @State private var newTag = ""
     @State private var title = ""
+    @FocusState private var titleFocused: Bool
     @State private var error: String?
 
     private var metadata: MeetingMetadata? { transcript.metadata }
@@ -33,7 +34,10 @@ struct MeetingDetails: View {
                 TextField("Title", text: $title, prompt: Text(metadata?.app ?? "Meeting"))
                     .labelsHidden()
                     .disabled(!canEditTags)
-                    .onSubmit { perform { try MeetingEditor(folder: folder).setTitle(title) } }
+                    .focused($titleFocused)
+                    .onSubmit(commitTitle)
+                    // Clicking elsewhere saves too, not only Return.
+                    .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
             }
             tagsSection
             speakersSection
@@ -47,11 +51,18 @@ struct MeetingDetails: View {
         .formStyle(.grouped)
         // Follows the file, e.g. when an agent sets a title.
         .onChange(of: metadata?.title, initial: true) { title = metadata?.title ?? "" }
+        // Closing the inspector or opening another meeting while typing.
+        .onDisappear(perform: commitTitle)
         .alert("Couldn't Save", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
         } message: {
             Text(error ?? "")
         }
+    }
+
+    private func commitTitle() {
+        guard canEditTags, MeetingEditor.clean(title) != (metadata?.title ?? "") else { return }
+        perform { try MeetingEditor(folder: folder).setTitle(title) }
     }
 
     // MARK: Tags
@@ -184,6 +195,9 @@ private struct SpeakerRow: View {
     let canRename: Bool
     let rename: (String) -> Void
     @State private var name = ""
+    @FocusState private var focused: Bool
+    /// Set once renamed, so losing focus or disappearing afterwards doesn't rename again.
+    @State private var renamed = false
 
     private var isMe: Bool { speaker == SpeakerLabel.me }
 
@@ -197,7 +211,10 @@ private struct SpeakerRow: View {
                     TextField("Name", text: $name, prompt: Text(speaker))
                         .labelsHidden()
                         .textFieldStyle(.plain)
+                        .focused($focused)
                         .onSubmit(commit)
+                        .onChange(of: focused) { _, focused in if !focused { commit() } }
+                        .onDisappear(perform: commit)
                         .textInputSuggestions {
                             ForEach(completions, id: \.self) { known in
                                 Text(known).textInputCompletion(known)
@@ -237,10 +254,12 @@ private struct SpeakerRow: View {
     }
 
     private func commit() {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !renamed else { return }
+        let trimmed = MeetingEditor.clean(name)
         if trimmed.isEmpty || trimmed == speaker {
-            name = speaker
+            if name != speaker { name = speaker }
         } else {
+            renamed = true
             rename(trimmed)
         }
     }

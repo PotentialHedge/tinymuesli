@@ -37,6 +37,8 @@ final class MeetingBrowser {
     private(set) var matches: [URL: Match]?
     @ObservationIgnored private var previews: [URL: (modified: Date?, text: String?, body: String)] = [:]
     @ObservationIgnored private var loading = false
+    /// A reload asked for while one ran (e.g. right after an edit); it runs once that one is done.
+    @ObservationIgnored private var reloadAgain = false
 
     /// Shows a meeting (the window opens via SwiftUI's `openWindow`).
     func select(_ folder: URL) {
@@ -46,7 +48,7 @@ final class MeetingBrowser {
 
     /// Reads the meetings folder off the main thread. Previews are only re-read when a transcript changed.
     func reload(store: MeetingStore) {
-        guard !loading else { return }
+        guard !loading else { reloadAgain = true; return }
         loading = true
         let cache = previews
         Task.detached(priority: .userInitiated) {
@@ -78,6 +80,10 @@ final class MeetingBrowser {
                 }
                 if self.selection == nil { self.selection = entries.first?.folder }
                 self.loading = false
+                if self.reloadAgain {
+                    self.reloadAgain = false
+                    self.reload(store: store)
+                }
             }
         }
     }
@@ -214,6 +220,8 @@ struct MeetingsWindow: View {
                             browser.reload(store: model.store)
                         }
                     )
+                    // A fresh inspector per meeting, so a half-typed name is saved to the right one.
+                    .id(folder)
                 } else {
                     ContentUnavailableView("No Meeting Selected", systemImage: "info.circle")
                 }

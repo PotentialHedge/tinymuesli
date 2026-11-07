@@ -92,7 +92,7 @@ public struct MeetingEditor: Sendable {
     }
 
     /// One line, without the characters that mark speakers in `transcript.md` (`**Name** [time]`).
-    static func clean(_ text: String) -> String {
+    public static func clean(_ text: String) -> String {
         text.components(separatedBy: .newlines).joined(separator: " ")
             .filter { !"*[]".contains($0) }
             .trimmingCharacters(in: .whitespaces)
