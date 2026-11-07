@@ -57,6 +57,27 @@ public struct ChatTranscript: Sendable, Equatable {
         return text.count > maxLength ? String(text.prefix(maxLength)) + "…" : text
     }
 
+    /// How often `query` occurs in a transcript body (ignoring case and accents), and the text
+    /// around the first match, for search results in the list of meetings.
+    public static func matches(in body: String, query: String) -> (count: Int, excerpt: String?) {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return (0, nil) }
+        var count = 0
+        var excerpt: String?
+        for paragraph in body.components(separatedBy: "\n\n") {
+            guard let turn = MeetingLibrary.parseTurn(paragraph) else { continue }
+            var search = turn.text.startIndex..<turn.text.endIndex
+            while let range = turn.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: search) {
+                count += 1
+                if excerpt == nil {
+                    excerpt = MeetingLibrary.excerpt(of: turn.text, around: query, radius: 60).map { "\(turn.speaker): \($0)" }
+                }
+                search = range.upperBound..<turn.text.endIndex
+            }
+        }
+        return (count, excerpt)
+    }
+
     /// Joins consecutive segments of one speaker into a message, as long as they follow closely and
     /// the message stays short enough to read as one bubble.
     public static func messages(from segments: [Segment], maxPause: Double = 4, maxLength: Int = 320) -> [Message] {

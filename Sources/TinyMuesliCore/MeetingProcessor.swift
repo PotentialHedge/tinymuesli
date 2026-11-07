@@ -114,7 +114,7 @@ public struct MeetingProcessor: Sendable {
     }
 
     /// Everything after the frontmatter, so a status change keeps the live transcript.
-    static func body(of url: URL) -> String {
+    public static func body(of url: URL) -> String {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
         let lines = text.components(separatedBy: "\n")
         guard lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") else { return text }

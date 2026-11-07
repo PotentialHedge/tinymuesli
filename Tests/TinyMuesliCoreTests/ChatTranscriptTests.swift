@@ -31,4 +31,12 @@ import Testing
         #expect(messages.map(\.start) == [3, 65])
         #expect(messages[0].end == 65)
     }
+
+    @Test func countsMatchesAcrossTurns() {
+        let body = "**Me** [00:00:03] The café opens at nine. Cafe or not?\n\n**Speaker 1** [00:01:05] Sure."
+        let result = ChatTranscript.matches(in: body, query: "CAFE")
+        #expect(result.count == 2)
+        #expect(result.excerpt == "Me: The café opens at nine. Cafe or not?")
+        #expect(ChatTranscript.matches(in: body, query: "zebra").count == 0)
+    }
 }

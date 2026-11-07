@@ -21,9 +21,20 @@ final class MeetingBrowser {
         let app: String?
     }
 
+    /// A meeting found by the search in the sidebar.
+    struct Match: Equatable {
+        /// Times the query occurs in the transcript; 0 if only the name, app or a speaker matched.
+        let count: Int
+        let excerpt: String?
+    }
+
     var selection: URL?
     private(set) var entries: [Entry] = []
-    @ObservationIgnored private var previews: [URL: (modified: Date?, text: String?)] = [:]
+    /// Typed into the sidebar's search field. The selected meeting highlights it too.
+    var query = ""
+    /// Search results by folder; nil when not searching.
+    private(set) var matches: [URL: Match]?
+    @ObservationIgnored private var previews: [URL: (modified: Date?, text: String?, body: String)] = [:]
     @ObservationIgnored private var loading = false
 
     /// Shows a meeting (the window opens via SwiftUI's `openWindow`).
@@ -39,15 +50,17 @@ final class MeetingBrowser {
         let cache = previews
         Task.detached(priority: .userInitiated) {
             let library = MeetingLibrary(store: store)
-            var newCache: [URL: (modified: Date?, text: String?)] = [:]
+            var newCache: [URL: (modified: Date?, text: String?, body: String)] = [:]
             var entries: [Entry] = []
             for summary in library.meetings() {
                 let folder = URL(fileURLWithPath: summary.path)
                 let modified = try? folder.appendingPathComponent(MeetingFiles.transcript)
                     .resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-                let preview = cache[folder].flatMap { $0.modified == modified ? $0.text : nil }
-                    ?? ChatTranscript.preview(folder: folder)
-                newCache[folder] = (modified, preview)
+                let cached = cache[folder].flatMap { $0.modified == modified ? $0 : nil }
+                let preview = cached.map(\.text) ?? ChatTranscript.preview(folder: folder)
+                let body = cached?.body
+                    ?? MeetingProcessor.body(of: folder.appendingPathComponent(MeetingFiles.transcript))
+                newCache[folder] = (modified, preview, body)
                 entries.append(Entry(
                     folder: folder, name: MeetingStore.displayName(of: folder, start: summary.start),
                     start: summary.start, end: summary.end,
@@ -57,10 +70,40 @@ final class MeetingBrowser {
             }
             await MainActor.run {
                 self.previews = newCache
-                if self.entries != entries { self.entries = entries }
+                if self.entries != entries {
+                    self.entries = entries
+                    // A live transcript grew, or a meeting came or went: results may differ.
+                    Task { await self.search() }
+                }
                 if self.selection == nil { self.selection = entries.first?.folder }
                 self.loading = false
             }
+        }
+    }
+
+    /// Searches names, apps, speakers and whole transcripts off the main thread.
+    func search() async {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { matches = nil; return }
+        let entries = entries
+        let bodies = previews.mapValues(\.body)
+        let found = await Task.detached(priority: .userInitiated) {
+            var found: [URL: Match] = [:]
+            for entry in entries {
+                let inText = ChatTranscript.matches(in: bodies[entry.folder] ?? "", query: query)
+                let inName = ([entry.name, entry.app ?? ""] + entry.speakers).contains {
+                    $0.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                }
+                if inText.count > 0 || inName { found[entry.folder] = Match(count: inText.count, excerpt: inText.excerpt) }
+            }
+            return found
+        }.value
+        // Typing on while this ran: a newer search will set the results.
+        guard query == self.query.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        matches = found
+        // Like Mail: show a result rather than a meeting the search hides.
+        if let selection, found[selection] == nil {
+            self.selection = entries.first { found[$0.folder] != nil }?.folder
         }
     }
 
@@ -75,14 +118,16 @@ struct MeetingsWindow: View {
 
     private var visible: [MeetingBrowser.Entry] {
         let deleting = Set(model.pendingDeletion.map(MeetingBrowser.path))
-        return browser.entries.filter { !deleting.contains(MeetingBrowser.path($0.folder)) }
+        return browser.entries.filter {
+            !deleting.contains(MeetingBrowser.path($0.folder)) && (browser.matches.map { [folder = $0.folder] in $0[folder] != nil } ?? true)
+        }
     }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $browser.selection) {
                 ForEach(visible) { entry in
-                    MeetingRow(entry: entry, isOngoing: isOngoing(entry))
+                    MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
                         .tag(entry.folder)
                         .contextMenu {
                             Button("Show in Finder") {
@@ -93,8 +138,17 @@ struct MeetingsWindow: View {
                         }
                 }
             }
+            .searchable(text: $browser.query, placement: .sidebar, prompt: "Search Meetings")
+            .task(id: browser.query) {
+                // Wait for a pause in typing.
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                await browser.search()
+            }
             .overlay {
-                if visible.isEmpty {
+                if visible.isEmpty, browser.matches != nil {
+                    ContentUnavailableView.search(text: browser.query)
+                } else if visible.isEmpty {
                     ContentUnavailableView("No Meetings", systemImage: "bubble.left.and.bubble.right",
                                            description: Text("Recorded meetings show up here."))
                 }
@@ -102,7 +156,7 @@ struct MeetingsWindow: View {
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
         } detail: {
             if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
-                ChatView(folder: folder)
+                ChatView(folder: folder, highlight: browser.matches == nil ? "" : browser.query)
                     .id(folder)
                     .navigationTitle(entry.name)
                     .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
@@ -132,6 +186,8 @@ struct MeetingsWindow: View {
 private struct MeetingRow: View {
     let entry: MeetingBrowser.Entry
     let isOngoing: Bool
+    let match: MeetingBrowser.Match?
+    let query: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -159,7 +215,7 @@ private struct MeetingRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text(entry.preview ?? (isOngoing ? "Nothing said yet." : "No transcript."))
+                Text(snippet)
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
@@ -181,7 +237,24 @@ private struct MeetingRow: View {
         }
         let people = entry.speakers.count
         if people > 1 { parts.append("\(people) people") }
+        if let match, match.count > 0 { parts.append(match.count == 1 ? "1 match" : "\(match.count) matches") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The start of the transcript, or while searching, the text around the first match in bold.
+    private var snippet: AttributedString {
+        guard let excerpt = match?.excerpt else {
+            return AttributedString(entry.preview ?? (isOngoing ? "Nothing said yet." : "No transcript."))
+        }
+        var text = AttributedString(excerpt)
+        var search = text.startIndex..<text.endIndex
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        while !q.isEmpty, let range = text[search].range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) {
+            text[range].font = .subheadline.bold()
+            text[range].foregroundColor = .primary
+            search = range.upperBound..<text.endIndex
+        }
+        return text
     }
 
     /// Like Mail: the time today, "Yesterday", the weekday this week, else the date.
@@ -231,22 +304,26 @@ private struct AppIcon: View {
 
 private struct ChatView: View {
     let folder: URL
+    /// The sidebar's search: highlighted, with buttons to step through the matches.
+    let highlight: String
     @State private var transcript = ChatTranscript(metadata: nil, messages: [])
     @State private var modified: Date?
-    @State private var query = ""
+    /// Index into `matchIDs` of the match scrolled to.
+    @State private var currentMatch = 0
 
     private var isLive: Bool {
         guard let status = transcript.metadata?.status else { return false }
         return status == .recording || status == .recorded || status == .transcribing
     }
 
-    private var shown: [ChatTranscript.Message] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return transcript.messages }
+    private var query: String { highlight.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Messages containing the search, in order.
+    private var matchIDs: [Int] {
+        guard !query.isEmpty else { return [] }
         return transcript.messages.filter {
-            $0.text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                || $0.speaker.localizedCaseInsensitiveContains(q)
-        }
+            $0.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }.map(\.id)
     }
 
     var body: some View {
@@ -254,7 +331,7 @@ private struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     header
-                    let messages = shown
+                    let messages = transcript.messages
                     ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                         let previous = index > 0 ? messages[index - 1] : nil
                         if let divider = divider(before: message, previous: previous) {
@@ -269,16 +346,13 @@ private struct ChatView: View {
                             color: color(for: message.speaker),
                             startsGroup: previous?.speaker != message.speaker || divider(before: message, previous: previous) != nil,
                             showsSpeakerName: !message.isMe && transcript.speakers.count > 1,
-                            highlight: query
+                            highlight: query,
+                            isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id
                         )
                         .id(message.id)
                     }
                     if transcript.messages.isEmpty {
                         Text(isLive ? "Nothing said yet." : "This meeting has no transcript.")
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 40)
-                    } else if !query.isEmpty, shown.isEmpty {
-                        Text("No messages match “\(query)”.")
                             .foregroundStyle(.secondary)
                             .padding(.top, 40)
                     }
@@ -299,11 +373,39 @@ private struct ChatView: View {
                 if isLive, old > 0, new > old, query.isEmpty {
                     withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
+                // Opened from a search: go to the first match once the transcript is in.
+                if old == 0, let first = matchIDs.first { proxy.scrollTo(first, anchor: .center) }
+            }
+            .onChange(of: query) {
+                currentMatch = 0
+                if let first = matchIDs.first { withAnimation { proxy.scrollTo(first, anchor: .center) } }
+            }
+            .onChange(of: currentMatch) {
+                guard matchIDs.indices.contains(currentMatch) else { return }
+                withAnimation { proxy.scrollTo(matchIDs[currentMatch], anchor: .center) }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
-        .searchable(text: $query, placement: .toolbar, prompt: "Search transcript")
         .toolbar {
+            if !query.isEmpty {
+                ToolbarItem {
+                    let count = matchIDs.count
+                    ControlGroup {
+                        Button { currentMatch = (currentMatch - 1 + count) % count } label: {
+                            Label("Previous Match", systemImage: "chevron.up")
+                        }
+                        .keyboardShortcut("g", modifiers: [.command, .shift])
+                        Button { currentMatch = (currentMatch + 1) % count } label: {
+                            Label("Next Match", systemImage: "chevron.down")
+                        }
+                        .keyboardShortcut("g", modifiers: .command)
+                    } label: {
+                        Text("Matches")
+                    }
+                    .disabled(count == 0)
+                    .help(count == 0 ? "No matches in this meeting" : "Match \(min(currentMatch, count - 1) + 1) of \(count)")
+                }
+            }
             ToolbarItem {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
@@ -392,6 +494,7 @@ private struct Bubble: View {
     let startsGroup: Bool
     let showsSpeakerName: Bool
     let highlight: String
+    let isCurrentMatch: Bool
 
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
@@ -433,7 +536,7 @@ private struct Bubble: View {
         guard !q.isEmpty else { return text }
         var search = text.startIndex..<text.endIndex
         while let range = text[search].range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) {
-            text[range].backgroundColor = .yellow.opacity(0.6)
+            text[range].backgroundColor = isCurrentMatch ? .orange : .yellow.opacity(0.6)
             text[range].foregroundColor = .black
             search = range.upperBound..<text.endIndex
         }
