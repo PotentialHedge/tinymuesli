@@ -422,6 +422,9 @@ private struct ChatView: View {
     /// Where each visible bubble is, for finding the hovered one. Not observed: it changes on
     /// every layout, and nothing needs to redraw when it does.
     @State private var bubbleFrames = BubbleFrames()
+    /// Assistants with tinyMuesli's MCP server, for the chat button. Read from their config files
+    /// when the window appears and whenever the app comes to the front, not on every redraw.
+    @State private var chatServices = ChatHandoff.Service.withMCPServer
     private static let chatSpace = "chat"
     /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
     @AppStorage("chatSpeakerColors") private var speakerColors = false
@@ -538,15 +541,25 @@ private struct ChatView: View {
                     .help(count == 0 ? "No matches in this meeting" : "Match \(min(currentMatch, count - 1) + 1) of \(count)")
                 }
             }
-            ToolbarItem {
-                Menu {
-                    ForEach(ChatHandoff.Service.allCases, id: \.self) { service in
-                        Button("Chat in \(service.name)") { openChat(in: service) }
+            // Only the assistants that have tinyMuesli's MCP server, since that's how they read the meeting.
+            if let only = chatServices.first, chatServices.count == 1 {
+                ToolbarItem {
+                    Button { openChat(in: only) } label: {
+                        Label("Chat in \(only.name)", systemImage: "bubble.left.and.text.bubble.right")
                     }
-                } label: {
-                    Label("Chat About Meeting", systemImage: "bubble.left.and.text.bubble.right")
+                    .help("Chat about this meeting in \(only.name), which reads it through tinyMuesli's MCP server")
                 }
-                .help("Chat about this meeting in Claude or ChatGPT, which read it through tinyMuesli's MCP server")
+            } else if !chatServices.isEmpty {
+                ToolbarItem {
+                    Menu {
+                        ForEach(chatServices, id: \.self) { service in
+                            Button("Chat in \(service.name)") { openChat(in: service) }
+                        }
+                    } label: {
+                        Label("Chat About Meeting", systemImage: "bubble.left.and.text.bubble.right")
+                    }
+                    .help("Chat about this meeting in an assistant that reads it through tinyMuesli's MCP server")
+                }
             }
             ToolbarItem {
                 Button {
@@ -579,6 +592,10 @@ private struct ChatView: View {
             Text(renameError ?? "")
         }
         .onChange(of: session.editCount) { reloadIfChanged(force: true) }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            let now = ChatHandoff.Service.withMCPServer
+            if now != chatServices { chatServices = now }
+        }
         .task(id: folder) {
             session.show(folder)
             // Reload when the transcript changes: it grows live while recording and is rewritten

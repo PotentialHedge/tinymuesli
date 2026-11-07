@@ -13,6 +13,17 @@ public enum ChatHandoff {
             }
         }
 
+        /// Whether tinyMuesli's MCP server is in this service's config, so a chat there can read meetings.
+        public var hasMCPServer: Bool {
+            switch self {
+            case .claude: ClaudeDesktopConfig.isInstalled()
+            case .chatGPT: CodexConfig.isInstalled()
+            }
+        }
+
+        /// The services that have tinyMuesli's MCP server.
+        public static var withMCPServer: [Service] { allCases.filter(\.hasMCPServer) }
+
         /// The Claude app, which has tinyMuesli's MCP server, if it's installed; else the web.
         func base(appInstalled: Bool) -> String {
             switch self {
