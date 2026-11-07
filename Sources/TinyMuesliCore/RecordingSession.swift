@@ -42,6 +42,12 @@ public final class RecordingSession {
         )
     }
 
+    /// You're muted: the mic track records silence until unmuted, so it stays aligned with the other.
+    public var micMuted: Bool {
+        get { mic.muted }
+        set { mic.muted = newValue }
+    }
+
     public var transcriptURL: URL { folder.appendingPathComponent(MeetingFiles.transcript) }
     public var audioFolder: URL { folder.appendingPathComponent(MeetingFiles.audio, isDirectory: true) }
 

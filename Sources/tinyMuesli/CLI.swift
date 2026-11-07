@@ -4,11 +4,12 @@ import TinyMuesliCore
 /// The same binary doubles as a CLI: `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
-    static let commands: Set<String> = ["mic-users", "record", "transcribe", "languages", "list", "show", "search", "mcp", "help", "--help", "-h"]
+    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "mcp", "help", "--help", "-h"]
 
     static func run(_ args: [String]) -> Int32 {
         switch args.first {
         case "mic-users": return micUsers()
+        case "mute-state": return muteState()
         case "record": return record(Array(args.dropFirst()))
         case "transcribe": return transcribe(Array(args.dropFirst()))
         case "languages": return languages()
@@ -26,6 +27,7 @@ enum CLI {
         usage: tinymuesli <command>
 
           mic-users                 List processes using the microphone and the meeting app each maps to
+          mute-state                Whether each running meeting app shows you as muted, and the buttons that say so
           record [--seconds N]      Record mic + system audio (default 10s) into a new meeting folder
                  [--root DIR]       Meetings root (default: the app's setting, else ~/Meetings)
                  [--no-transcribe]  Skip the transcription pass afterwards
@@ -41,6 +43,29 @@ enum CLI {
 
           list, show and search also take --json. list, show, search and mcp also take --root DIR.
         """
+
+    /// Reads the same buttons the app does, to check mute detection during a call. Needs Accessibility
+    /// access for the terminal it runs in.
+    private static func muteState() -> Int32 {
+        guard CallMute.isAllowed else {
+            CallMute.requestAccess()
+            print("Needs Accessibility access for this terminal: System Settings → Privacy & Security → Accessibility.")
+            return 1
+        }
+        let running = MeetingApps.known.filter(CallMute.isRunning)
+        if running.isEmpty { print("No meeting app is running.") }
+        for app in running {
+            let (labels, muted) = CallMute.explain(app)
+            let verdict = switch muted {
+            case true?: "muted"
+            case false?: "not muted"
+            case nil: "can't tell (recorded as not muted)"
+            }
+            print("\(app.name): \(verdict)")
+            for (label, meaning) in labels { print("  \(meaning)\t\(label)") }
+        }
+        return 0
+    }
 
     private static func micUsers() -> Int32 {
         do {

@@ -91,10 +91,17 @@ final class SegmentedTrack {
             let next = try TrackWriter(url: TrackSegments.segmentURL(first: first, number: count + 1), inputFormat: format,
                                        clockStart: clockStart, startSeconds: writer.endSeconds,
                                        speechDetector: speechDetector?(), tee: tee)
+            next.muted = writer.muted
             writer = next
             count += 1
             return next
         }
+    }
+
+    /// See `TrackWriter.muted`. Carries over to the next file.
+    var muted: Bool {
+        get { writer.muted }
+        set { writer.muted = newValue }
     }
 
     /// Seconds of track so far, across files.

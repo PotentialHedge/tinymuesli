@@ -19,6 +19,7 @@ import Synchronization
 /// above) and `lastError` reports it.
 ///
 /// With a speech detector, stretches without speech are written as zeros (see `SpeechGate`).
+/// So is everything written while `muted`.
 public final class TrackWriter: @unchecked Sendable {
     private let file: AVAudioFile
     private let tee: (@Sendable (AVAudioPCMBuffer) -> Void)?
@@ -34,6 +35,7 @@ public final class TrackWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "tinymuesli.track-writer", qos: .userInitiated)
     private let timer: DispatchSourceTimer
     private let isClosed = Atomic<Bool>(false)
+    private let isMuted = Atomic<Bool>(false)
     /// Written to the file in batches, so the tee gets sensible buffers rather than one per slot.
     private var pending: AVAudioPCMBuffer?
     private let gate: SpeechGate?
@@ -130,6 +132,13 @@ public final class TrackWriter: @unchecked Sendable {
         }
     }
 
+    /// While muted, audio is written as silence: the track keeps its length (so it stays aligned
+    /// with the others) but holds nothing. Takes effect within one drain (~50 ms).
+    public var muted: Bool {
+        get { isMuted.load(ordering: .relaxed) }
+        set { isMuted.store(newValue, ordering: .relaxed) }
+    }
+
     /// Gaps shorter than this are jitter, not missing audio.
     static let gapTolerance = 0.1
 
@@ -186,7 +195,11 @@ public final class TrackWriter: @unchecked Sendable {
         guard let batch = pending ?? AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: Self.batchFrames),
               let out = batch.floatChannelData?[0], let source = samples.baseAddress
         else { throw CocoaError(.featureUnsupported) }
-        (out + Int(batch.frameLength)).update(from: source, count: samples.count)
+        if muted {
+            (out + Int(batch.frameLength)).update(repeating: 0, count: samples.count)
+        } else {
+            (out + Int(batch.frameLength)).update(from: source, count: samples.count)
+        }
         batch.frameLength += AVAudioFrameCount(samples.count)
         pending = batch
     }

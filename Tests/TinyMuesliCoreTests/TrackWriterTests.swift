@@ -121,6 +121,22 @@ import Testing
         #expect(batches.count < 100)
     }
 
+    @Test func writesSilenceWhileMutedButKeepsTheLength() throws {
+        let url = url()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let received = Mutex<[Float]>([])
+        let source = stereo(frames: 4096, left: 0.5, right: 0.5)
+        let writer = try TrackWriter(url: url, inputFormat: source.format) { buffer in
+            received.withLock { $0 += UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)) }
+        }
+        writer.muted = true
+        writer.write(source)
+        writer.close()
+
+        #expect(writer.framesWritten == 4096)
+        #expect(received.withLock { $0 }.allSatisfy { $0 == 0 })
+    }
+
     @Test func fillsGapsWithSilenceSoTracksStayAligned() throws {
         let url = url()
         defer { try? FileManager.default.removeItem(at: url) }

@@ -48,6 +48,7 @@ The binary is also a CLI:
 
 ```sh
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli mic-users              # who's using the mic, and which meeting app it maps to
+build/tinyMuesli.app/Contents/MacOS/tinyMuesli mute-state             # whether each meeting app shows you as muted
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli record --seconds 10    # test recording, then transcribe
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli transcribe "<meeting folder>" [--language de-DE] [--no-diarize] [--delete-audio]
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli languages              # transcription languages on this Mac

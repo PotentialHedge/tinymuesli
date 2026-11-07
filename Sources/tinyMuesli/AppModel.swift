@@ -61,6 +61,24 @@ final class AppModel {
         }
     }
 
+    /// Don't record your mic while the call app shows you as muted (needs Accessibility access).
+    var followCallMute = Settings.followCallMute {
+        didSet {
+            Settings.followCallMute = followCallMute
+            applyMute()
+        }
+    }
+    /// "Mute Me" in the menu: your mic records silence until turned off again. Per recording.
+    var muteMe = false {
+        didSet { applyMute() }
+    }
+    /// The call app shows you as muted (see `CallMute`).
+    private(set) var callMuted = false
+    /// Accessibility access, which following the call's mute needs. Updated by the poll.
+    private(set) var muteAccessAllowed = CallMute.isAllowed
+    /// Your mic is recording silence right now.
+    var micMuted: Bool { muteMe || (followCallMute && callMuted) }
+
     /// A meeting is being recorded, paused, processed or moved, so the app shouldn't quit for an update.
     var isBusy: Bool {
         if case .recording = status { return true }
@@ -82,6 +100,8 @@ final class AppModel {
     /// For `skipSilence`. nil until its model has loaded; until then meetings record everything.
     @ObservationIgnored private var speechDetector: SpeechDetectorFactory?
     @ObservationIgnored private var loadingSpeechDetector = false
+    /// A `CallMute` check is running (it walks another app's UI, so it runs off the main thread).
+    @ObservationIgnored private var checkingMute = false
 
     private static let alwaysRecordKey = "alwaysRecord"
     static let continueWindow: TimeInterval = 5 * 60
@@ -127,6 +147,42 @@ final class AppModel {
             log.notice("Detector: \(String(describing: event), privacy: .public)")
             handle(event)
         }
+        checkCallMute()
+    }
+
+    // MARK: - Muting
+
+    /// Reads the call app's mute button, so what you say while muted isn't recorded.
+    private func checkCallMute() {
+        let allowed = CallMute.isAllowed
+        if muteAccessAllowed != allowed { muteAccessAllowed = allowed }
+        guard followCallMute, allowed, !checkingMute, case .recording(let session, let following) = status,
+              let app = following ?? detector.current
+        else { return }
+        checkingMute = true
+        Task {
+            let muted = await Task.detached { CallMute.isMuted(in: app) }.value
+            checkingMute = false
+            // The recording may have ended (or another started) while the check ran.
+            guard case .recording(let current, _) = status, current === session else { return }
+            setCallMuted(muted ?? false)
+        }
+    }
+
+    private func setCallMuted(_ muted: Bool) {
+        guard callMuted != muted else { return }
+        callMuted = muted
+        applyMute()
+    }
+
+    private func applyMute() {
+        guard case .recording(let session, _) = status, session.micMuted != micMuted else { return }
+        session.micMuted = micMuted
+        log.notice("Mic track \(self.micMuted ? "muted" : "unmuted", privacy: .public)")
+    }
+
+    func requestMuteAccess() {
+        if !CallMute.requestAccess() { NSWorkspace.shared.open(CallMute.settingsURL) }
     }
 
     private func handle(_ event: MeetingDetector.Event) {
@@ -214,7 +270,10 @@ final class AppModel {
                                                    speechDetector: skipSilence ? speechDetector : nil)
                 try session.start()
                 lastError = session.warnings.first
+                muteMe = false
+                callMuted = false
                 status = .recording(session, following: app)
+                applyMute()
                 refreshRecentMeetings()
                 // Fetch the diarization models now (first time only) so they're ready at the end.
                 Task { [diarizer] in try? await diarizer.prepare() }
@@ -263,7 +322,9 @@ final class AppModel {
             try session.resume()
             log.notice("Continuing recording of \(session.folder.lastPathComponent, privacy: .public)")
             lastError = session.warnings.last
+            callMuted = false  // until the next check
             status = .recording(session, following: detector.current)
+            applyMute()
         } catch {
             finish(session)
             startRecording(app: detector.current)
@@ -755,5 +816,11 @@ final class AppModel {
             let since = session.startedAt.formatted(date: .omitted, time: .shortened)
             return "Recording \(session.appName ?? "meeting") since \(since)"
         }
+    }
+
+    /// Shown under the status line while your mic isn't being recorded.
+    var mutedText: String? {
+        guard case .recording = status, micMuted else { return nil }
+        return muteMe ? "Muted: your mic isn't recorded" : "You're muted in the call: your mic isn't recorded"
     }
 }

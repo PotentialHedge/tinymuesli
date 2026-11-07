@@ -16,6 +16,13 @@ public final class MicRecorder {
     public var secondsWritten: Double { track?.seconds ?? 0 }
     public var writeError: Error? { track?.writer.lastError }
 
+    /// While muted the mic stays open but the track records silence, so nothing said is kept or
+    /// transcribed. Kept open rather than released so unmuting is instant and the call app's audio
+    /// processing isn't disturbed.
+    public var muted = false {
+        didSet { track?.muted = muted }
+    }
+
     public static func requestPermission() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return true
@@ -29,6 +36,7 @@ public final class MicRecorder {
         let format = try prepareInput()
         let track = try SegmentedTrack(url: url, inputFormat: format, clockStart: clockStart,
                                        speechDetector: speechDetector, tee: tee)
+        track.muted = muted
         self.track = track
         try capture(format: format, into: track.writer)
     }

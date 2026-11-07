@@ -55,6 +55,12 @@ public enum Settings {
         set { defaults.set(newValue, forKey: "skipSilence") }
     }
 
+    /// While the call app shows you as muted, record silence on your mic track. On by default.
+    public static var followCallMute: Bool {
+        get { defaults.object(forKey: "followCallMute") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "followCallMute") }
+    }
+
     /// Where meeting folders go. nil = `MeetingStore.defaultRoot` (~/Meetings).
     public static var meetingsFolder: URL? {
         get { defaults.string(forKey: "meetingsFolder").map { URL(fileURLWithPath: $0, isDirectory: true) } }

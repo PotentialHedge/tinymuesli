@@ -61,6 +61,9 @@ private struct MenuContent: View {
             Divider()
         }
         Text(model.statusText)
+        if let muted = model.mutedText {
+            Text(muted)
+        }
         if let ended = model.endedText {
             Text(ended)
         }
@@ -79,6 +82,10 @@ private struct MenuContent: View {
         case .recording:
             Button("Stop Recording") { model.stopRecording() }
             Button("Start New Meeting") { model.startNewMeeting() }
+            Toggle("Mute Me", isOn: $model.muteMe)
+            if model.followCallMute, !model.muteAccessAllowed {
+                Button("Allow Accessibility to Notice When You Mute…") { model.requestMuteAccess() }
+            }
         }
         if let ended = model.ended {
             Button("Continue \(AppModel.title(of: ended.session))") { model.continueMeeting() }
@@ -136,6 +143,7 @@ private struct MenuContent: View {
         Menu("Settings") {
             Toggle("Keep Audio After Transcribing", isOn: $model.keepAudio)
             Toggle("Skip Silence While Recording", isOn: $model.skipSilence)
+            Toggle("Don't Record Me While Muted in the Call", isOn: $model.followCallMute)
             Button("Meetings Folder: \(model.meetingsFolderName)…") { model.chooseMeetingsFolder() }
             Toggle("Open at Login", isOn: Binding(
                 get: { LoginItem.isEnabled },
