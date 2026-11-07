@@ -113,9 +113,45 @@ final class MeetingBrowser {
     }
 }
 
+/// The meeting open in the window: its transcript and voice suggestions. The chat loads them and
+/// the details inspector shows them; the inspector belongs to the split view (so the three columns
+/// share the window properly), not to the chat, so they meet here.
+@MainActor
+@Observable
+final class MeetingSession {
+    private(set) var folder: URL?
+    var transcript = ChatTranscript(metadata: nil, messages: [])
+    /// Voices recognised from other meetings, for speakers that aren't named yet.
+    var suggestions: [VoiceMatcher.Suggestion] = []
+    /// Bumped after an edit in the inspector, so the chat reloads at once.
+    var editCount = 0
+    @ObservationIgnored var modified: Date?
+
+    func show(_ folder: URL) {
+        guard folder != self.folder else { return }
+        self.folder = folder
+        transcript = ChatTranscript(metadata: nil, messages: [])
+        suggestions = []
+        modified = nil
+    }
+}
+
+/// Me is always the accent colour; everyone else grey, or a colour each when `colored`.
+func speakerColor(_ speaker: String, speakers: [String], colored: Bool) -> Color {
+    if speaker == SpeakerLabel.me { return .accentColor }
+    guard colored else { return .gray }
+    let palette: [Color] = [.orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .cyan, .red]
+    let index = speakers.filter { $0 != SpeakerLabel.me }.firstIndex(of: speaker) ?? 0
+    return palette[index % palette.count]
+}
+
 struct MeetingsWindow: View {
     let model: AppModel
     @Bindable var browser: MeetingBrowser
+    /// Shared with the chat's toolbar button.
+    @AppStorage("meetingDetailsShown") private var showsDetails = false
+    @AppStorage("chatSpeakerColors") private var speakerColors = false
+    @State private var session = MeetingSession()
 
     private var visible: [MeetingBrowser.Entry] {
         let deleting = Set(model.pendingDeletion.map(MeetingBrowser.path))
@@ -157,9 +193,8 @@ struct MeetingsWindow: View {
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
         } detail: {
             if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
-                ChatView(folder: folder, highlight: browser.matches == nil ? "" : browser.query,
-                         store: model.store, knownTags: knownTags, knownNames: knownNames,
-                         onEdited: { browser.reload(store: model.store) })
+                ChatView(folder: folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
+                         store: model.store, onEdited: { browser.reload(store: model.store) })
                     .id(folder)
                     .navigationTitle(entry.name)
                     .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
@@ -167,6 +202,24 @@ struct MeetingsWindow: View {
                 ContentUnavailableView("No Meeting Selected", systemImage: "bubble.left.and.bubble.right")
                     .navigationTitle("Meetings")
             }
+        }
+        .inspector(isPresented: $showsDetails) {
+            Group {
+                if let folder = browser.selection, session.folder == folder {
+                    MeetingDetails(
+                        folder: folder, transcript: session.transcript, suggestions: session.suggestions,
+                        knownTags: knownTags, knownNames: knownNames, speakerColors: $speakerColors,
+                        color: { [session, speakerColors] in speakerColor($0, speakers: session.transcript.speakers, colored: speakerColors) },
+                        onEdited: {
+                            session.editCount += 1
+                            browser.reload(store: model.store)
+                        }
+                    )
+                } else {
+                    ContentUnavailableView("No Meeting Selected", systemImage: "info.circle")
+                }
+            }
+            .inspectorColumnWidth(min: 240, ideal: 300, max: 400)
         }
         .frame(minWidth: 700, minHeight: 420)
         .onChange(of: model.recentMeetings) { browser.reload(store: model.store) }
@@ -331,20 +384,23 @@ private struct AppIcon: View {
 
 private struct ChatView: View {
     let folder: URL
+    let session: MeetingSession
     /// The sidebar's search: highlighted, with buttons to step through the matches.
     let highlight: String
     let store: MeetingStore
-    let knownTags: [String]
-    let knownNames: [String]
     let onEdited: () -> Void
     @AppStorage("meetingDetailsShown") private var showsDetails = false
-    @State private var transcript = ChatTranscript(metadata: nil, messages: [])
-    @State private var modified: Date?
-    /// Voices recognised from other meetings, for speakers that aren't named yet.
-    @State private var suggestions: [VoiceMatcher.Suggestion] = []
+    private var transcript: ChatTranscript { session.folder == folder ? session.transcript : ChatTranscript(metadata: nil, messages: []) }
+    private var suggestions: [VoiceMatcher.Suggestion] { session.folder == folder ? session.suggestions : [] }
     @State private var renameError: String?
     /// Index into `matchIDs` of the match scrolled to.
     @State private var currentMatch = 0
+    /// The message under the pointer, which shows its time.
+    @State private var hoveredMessage: Int?
+    /// Where each visible bubble is, for finding the hovered one. Not observed: it changes on
+    /// every layout, and nothing needs to redraw when it does.
+    @State private var bubbleFrames = BubbleFrames()
+    private static let chatSpace = "chat"
     /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
     @AppStorage("chatSpeakerColors") private var speakerColors = false
 
@@ -386,8 +442,13 @@ private struct ChatView: View {
                             suggestion: transcript.metadata?.status == .done ? suggestion(for: message.speaker) : nil,
                             confirm: { rename(message.speaker, to: $0) },
                             highlight: query,
-                            isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id
+                            isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id,
+                            showsTime: hoveredMessage == message.id
                         )
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.chatSpace)) } action: { frame in
+                            bubbleFrames.frames[message.id] = frame
+                        }
+                        .onDisappear { bubbleFrames.frames[message.id] = nil }
                         .id(message.id)
                     }
                     if transcript.messages.isEmpty {
@@ -405,6 +466,16 @@ private struct ChatView: View {
                     Color.clear.frame(height: 12).id("bottom")
                 }
                 .padding(.horizontal, 16)
+                .coordinateSpace(.named(Self.chatSpace))
+                // One hover region for the whole chat rather than one per bubble: while a column
+                // animates, SwiftUI re-checks every hover region on every frame.
+                .onContinuousHover(coordinateSpace: .named(Self.chatSpace)) { phase in
+                    var hovered: Int?
+                    if case .active(let point) = phase {
+                        hovered = bubbleFrames.frames.first { $0.value.contains(point) }?.key
+                    }
+                    if hovered != hoveredMessage { hoveredMessage = hovered }
+                }
             }
             .defaultScrollAnchor(isLive ? .bottom : .top)
             .onChange(of: transcript.messages.count) { old, new in
@@ -461,29 +532,21 @@ private struct ChatView: View {
                 .keyboardShortcut("i", modifiers: .command)
             }
         }
-        .inspector(isPresented: $showsDetails) {
-            MeetingDetails(
-                folder: folder, transcript: transcript, suggestions: suggestions, knownTags: knownTags, knownNames: knownNames,
-                speakerColors: $speakerColors, color: color(for:),
-                onEdited: {
-                    reloadIfChanged(force: true)
-                    onEdited()
-                }
-            )
-            .inspectorColumnWidth(min: 240, ideal: 300, max: 400)
-        }
         .task(id: "\(folder.path)|\(transcript.speakers.joined(separator: "|"))") {
             let folder = folder, store = store
-            suggestions = await Task.detached(priority: .userInitiated) {
+            let found = await Task.detached(priority: .userInitiated) {
                 VoiceMatcher(store: store).suggestions(for: folder)
             }.value
+            if session.folder == folder { session.suggestions = found }
         }
         .alert("Couldn't Rename", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
             Button("OK") {}
         } message: {
             Text(renameError ?? "")
         }
+        .onChange(of: session.editCount) { reloadIfChanged(force: true) }
         .task(id: folder) {
+            session.show(folder)
             // Reload when the transcript changes: it grows live while recording and is rewritten
             // by the final pass.
             while !Task.isCancelled {
@@ -536,12 +599,7 @@ private struct ChatView: View {
     }
 
     private func color(for speaker: String) -> Color {
-        if speaker == SpeakerLabel.me { return .accentColor }
-        guard speakerColors else { return .gray }
-        let palette: [Color] = [.orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .cyan, .red]
-        let others = transcript.speakers.filter { $0 != SpeakerLabel.me }
-        let index = others.firstIndex(of: speaker) ?? 0
-        return palette[index % palette.count]
+        speakerColor(speaker, speakers: transcript.speakers, colored: speakerColors)
     }
 
     private func suggestion(for speaker: String) -> VoiceMatcher.Suggestion? {
@@ -563,12 +621,15 @@ private struct ChatView: View {
         let urls = [MeetingFiles.transcript, MeetingFiles.json].map(folder.appendingPathComponent)
         let dates = urls.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
         let latest = dates.max()
-        guard force || latest != modified || transcript.metadata == nil else { return }
-        modified = latest
-        let folder = folder
+        guard force || latest != session.modified || transcript.metadata == nil else { return }
+        session.modified = latest
+        let folder = folder, session = session
         Task.detached(priority: .userInitiated) {
             let loaded = ChatTranscript.load(folder: folder)
-            await MainActor.run { transcript = loaded }
+            await MainActor.run {
+                // Another meeting may have been opened meanwhile.
+                if session.folder == folder { session.transcript = loaded }
+            }
         }
     }
 }
@@ -583,7 +644,7 @@ private struct Bubble: View {
     let confirm: (String) -> Void
     let highlight: String
     let isCurrentMatch: Bool
-    @State private var isHovering = false
+    let showsTime: Bool
 
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
@@ -620,10 +681,7 @@ private struct Bubble: View {
         }
         .frame(maxWidth: .infinity, alignment: message.isMe ? .trailing : .leading)
         .padding(.top, startsGroup ? 10 : 3)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
-        }
+        .animation(.easeOut(duration: 0.15), value: showsTime)
     }
 
     /// The position in the recording, small next to the bubble. Only while the pointer is on the
@@ -633,7 +691,7 @@ private struct Bubble: View {
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
             .padding(.bottom, 4)
-            .opacity(isHovering ? 1 : 0)
+            .opacity(showsTime ? 1 : 0)
     }
 
     private var attributed: AttributedString {
@@ -648,4 +706,9 @@ private struct Bubble: View {
         }
         return text
     }
+}
+
+/// Bubble frames in the chat's coordinate space, keyed by message id.
+private final class BubbleFrames {
+    var frames: [Int: CGRect] = [:]
 }
