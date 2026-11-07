@@ -542,23 +542,20 @@ private struct ChatView: View {
                 }
             }
             // Only the assistants that have tinyMuesli's MCP server, since that's how they read the meeting.
-            if let only = chatServices.first, chatServices.count == 1 {
+            ForEach(chatServices, id: \.self) { service in
                 ToolbarItem {
-                    Button { openChat(in: only) } label: {
-                        Label("Chat in \(only.name)", systemImage: "bubble.left.and.text.bubble.right")
-                    }
-                    .help("Chat about this meeting in \(only.name), which reads it through tinyMuesli's MCP server")
-                }
-            } else if !chatServices.isEmpty {
-                ToolbarItem {
-                    Menu {
-                        ForEach(chatServices, id: \.self) { service in
-                            Button("Chat in \(service.name)") { openChat(in: service) }
+                    Button { openChat(in: service) } label: {
+                        Label {
+                            Text("Chat in \(service.name)")
+                        } icon: {
+                            if let icon = Self.appIcon(for: service) {
+                                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                            } else {
+                                Image(systemName: "bubble.left.and.text.bubble.right")
+                            }
                         }
-                    } label: {
-                        Label("Chat About Meeting", systemImage: "bubble.left.and.text.bubble.right")
                     }
-                    .help("Chat about this meeting in an assistant that reads it through tinyMuesli's MCP server")
+                    .help("Chat about this meeting in \(service.name), which reads it through tinyMuesli")
                 }
             }
             ToolbarItem {
@@ -673,10 +670,25 @@ private struct ChatView: View {
         onEdited()
     }
 
+    /// The installed app for a service, if any: its icon is the chat button's.
+    private static func appURL(for service: ChatHandoff.Service) -> URL? {
+        service.bundleIdentifiers.lazy.compactMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }.first
+    }
+
+    @MainActor private static var iconCache: [ChatHandoff.Service: NSImage?] = [:]
+
+    @MainActor private static func appIcon(for service: ChatHandoff.Service) -> NSImage? {
+        if let cached = iconCache[service] { return cached }
+        let icon = appURL(for: service).map { NSWorkspace.shared.icon(forFile: $0.path) }
+        iconCache[service] = icon
+        return icon
+    }
+
     private func openChat(in service: ChatHandoff.Service) {
-        let appInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeDesktopConfig.bundleIdentifier) != nil
-        guard let url = ChatHandoff.url(for: service, meetingID: MeetingLibrary.id(of: folder),
-                                        title: transcript.metadata?.title, appInstalled: appInstalled) else { return }
+        let appInstalled = Self.appURL(for: .claude) != nil
+        guard let metadata = transcript.metadata,
+              let url = ChatHandoff.url(for: service, prompt: ChatHandoff.prompt(title: metadata.title, app: metadata.app, start: metadata.start),
+                                        appInstalled: appInstalled) else { return }
         NSWorkspace.shared.open(url)
     }
 

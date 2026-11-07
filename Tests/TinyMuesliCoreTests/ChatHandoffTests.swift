@@ -3,19 +3,26 @@ import Testing
 @testable import TinyMuesliCore
 
 @Suite struct ChatHandoffTests {
-    @Test func asksToReadTheMeetingThroughMCP() throws {
-        let url = try #require(ChatHandoff.url(for: .chatGPT, meetingID: "2026/11/2026-11-04 1030 Zoom", title: "Q4 + roadmap", appInstalled: false))
-        #expect(url.absoluteString.hasPrefix("https://chatgpt.com/?q="))
-        #expect(!url.absoluteString.contains("+"))
-        let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value
-        #expect(q == ChatHandoff.prompt(meetingID: "2026/11/2026-11-04 1030 Zoom", title: "Q4 + roadmap"))
-        #expect(q?.contains("get_transcript") == true)
+    let start = ISO8601DateFormatter().date(from: "2026-11-07T14:01:00Z")!
+    let utc = TimeZone(identifier: "UTC")!
+
+    @Test func namesTheMeetingByTitleOrApp() {
+        let titled = ChatHandoff.prompt(title: "ETH RC Sync", app: "Discord", start: start, timeZone: utc)
+        #expect(titled.hasPrefix("Let's talk about my meeting \"ETH RC Sync\" from "))
+        #expect(titled.contains("14:01") || titled.contains("2:01"))
+        #expect(titled.hasSuffix("You can read it with tinyMuesli."))
+        #expect(ChatHandoff.prompt(title: nil, app: "Zoom", start: start, timeZone: utc).hasPrefix("Let's talk about my Zoom meeting from "))
+    }
+
+    @Test func putsThePromptInTheURL() throws {
+        let url = try #require(ChatHandoff.url(for: .chatGPT, prompt: "Q4 + roadmap", appInstalled: false))
+        #expect(url.absoluteString == "https://chatgpt.com/?q=Q4%20%2B%20roadmap")
     }
 
     @Test func opensTheClaudeAppWhenInstalled() throws {
-        let app = try #require(ChatHandoff.url(for: .claude, meetingID: "a/b/c", title: nil, appInstalled: true))
-        #expect(app.absoluteString.hasPrefix("claude://claude.ai/new?q="))
-        let web = try #require(ChatHandoff.url(for: .claude, meetingID: "a/b/c", title: nil, appInstalled: false))
-        #expect(web.absoluteString.hasPrefix("https://claude.ai/new?q="))
+        let app = try #require(ChatHandoff.url(for: .claude, prompt: "hi", appInstalled: true))
+        #expect(app.absoluteString == "claude://claude.ai/new?q=hi")
+        let web = try #require(ChatHandoff.url(for: .claude, prompt: "hi", appInstalled: false))
+        #expect(web.absoluteString == "https://claude.ai/new?q=hi")
     }
 }
