@@ -44,6 +44,19 @@ public struct ChatTranscript: Sendable, Equatable {
         return ChatTranscript(metadata: metadata, messages: messages(fromMarkdown: MeetingProcessor.body(of: md)))
     }
 
+    /// The start of what was said, for a list of meetings: the first few turns of `transcript.md`.
+    public static func preview(folder: URL, maxLength: Int = 160) -> String? {
+        let body = MeetingProcessor.body(of: folder.appendingPathComponent(MeetingFiles.transcript))
+        var text = ""
+        for paragraph in body.components(separatedBy: "\n\n") {
+            guard let turn = MeetingLibrary.parseTurn(paragraph) else { continue }
+            text += (text.isEmpty ? "" : " ") + turn.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.count >= maxLength { break }
+        }
+        guard !text.isEmpty else { return nil }
+        return text.count > maxLength ? String(text.prefix(maxLength)) + "…" : text
+    }
+
     /// Joins consecutive segments of one speaker into a message, as long as they follow closely and
     /// the message stays short enough to read as one bubble.
     public static func messages(from segments: [Segment], maxPause: Double = 4, maxLength: Int = 320) -> [Message] {

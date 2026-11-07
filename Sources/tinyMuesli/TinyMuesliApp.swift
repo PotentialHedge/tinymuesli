@@ -7,7 +7,7 @@ struct TinyMuesliApp: App {
     @State private var updater: Updater
     @State private var permissions: Permissions
     @State private var onboarding: Onboarding
-    @State private var chats = ChatViewer()
+    @State private var browser = MeetingBrowser()
 
     init() {
         let model = AppModel()
@@ -24,10 +24,17 @@ struct TinyMuesliApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(model: model, updater: updater, permissions: permissions, onboarding: onboarding, chats: chats)
+            MenuContent(model: model, updater: updater, permissions: permissions, onboarding: onboarding, browser: browser)
         } label: {
             Image(systemName: menuBarSymbol)
         }
+
+        Window("Meetings", id: MeetingBrowser.windowID) {
+            MeetingsWindow(model: model, browser: browser)
+        }
+        .defaultSize(width: 980, height: 720)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
     }
 
     /// Flags missing permissions while nothing else is going on.
@@ -44,7 +51,8 @@ private struct MenuContent: View {
     let updater: Updater
     let permissions: Permissions
     let onboarding: Onboarding
-    let chats: ChatViewer
+    let browser: MeetingBrowser
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var model = model
@@ -113,11 +121,12 @@ private struct MenuContent: View {
         ForEach(model.recentDays) { day in
             Section(day.title) {
                 ForEach(day.meetings, id: \.folder) { meeting in
-                    Button(meeting.title) { chats.open(meeting.folder, title: meeting.title) }
+                    Button(meeting.title) { showMeetings(meeting.folder) }
                         .badge(meeting.isOngoing ? Text(OngoingPill.label) : meeting.length.map { Text($0) })
                 }
             }
         }
+        Button("Show All Meetings…") { showMeetings(nil) }
         Button("Open Meetings Folder") { model.openMeetingsFolder() }
         Button("Copy Prompt for Agent") { model.copyAgentPrompt() }
         Button("Add to Claude Desktop…") { model.addToClaudeDesktop() }
@@ -176,6 +185,14 @@ private struct MenuContent: View {
 
         Button("Quit tinyMuesli") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    private func showMeetings(_ folder: URL?) {
+        if let folder { browser.select(folder) }
+        browser.reload(store: model.store)
+        // A menu bar app isn't frontmost, so the window would open behind others.
+        NSApp.activate()
+        openWindow(id: MeetingBrowser.windowID)
     }
 
     /// "Allow Microphone Access…", or where to turn it on once macOS won't ask again.
