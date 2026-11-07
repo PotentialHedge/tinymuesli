@@ -18,6 +18,7 @@ struct TinyMuesliApp: App {
         _permissions = State(initialValue: permissions)
         _onboarding = State(initialValue: onboarding)
         OngoingPill.install()
+        DockPresence.install()
         // Once the app has finished launching, so the window can come to the front.
         DispatchQueue.main.async { onboarding.showIfNeeded() }
     }
