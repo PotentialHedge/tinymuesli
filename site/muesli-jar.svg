@@ -1,27 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
-  <title id="title">tinyMuesli: an open jar of muesli</title>
+  <title id="title">tinyMuesli: an open mason jar of muesli</title>
   <defs>
-    <path id="body" d="M30 48h68q6 0 6 6v42q0 22-22 22H46q-22 0-22-22V54q0-6 6-6z"/>
+    <path id="body" d="M40 42h48c0 6 18 6 18 18v44q0 14-14 14H36q-14 0-14-14V60c0-12 18-12 18-18z"/>
     <clipPath id="inside"><use href="#body"/></clipPath>
   </defs>
   <g stroke="#30271f" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-    <!-- Lid, lifted off and tipped open -->
-    <g transform="rotate(-14 64 20)">
-      <rect x="26" y="12" width="78" height="14" rx="6" fill="#d7e6df"/>
-      <path d="M35 18h40" fill="none" stroke="#fff" stroke-width="3"/>
-    </g>
-    <!-- Glass body and muesli -->
-    <use href="#body" fill="#f5ead7" stroke="none"/>
-    <g clip-path="url(#inside)" stroke-width="2.5">
-      <path d="M20 66q11-7 22 0t22 0 22 0 22 0v60H20z" fill="#bd7040" stroke="none"/>
-      <path d="m30 80 10-9 12 5-3 11-13 2zM58 72l12-2 8 9-8 9-13-4zM84 76l10-7 9 9-4 10-12 0zM36 101l11-8 11 6-3 12-14 1zM64 95l13-5 10 10-7 10-14-3z" fill="#e9b967" stroke="#70452c"/>
-      <path d="m46 86 7-5 7 4-6 6zM77 87l7-5 6 5-7 5zM88 106l7-4 6 5-7 5z" fill="#f4d899" stroke="#70452c"/>
+    <!-- Glass body -->
+    <use href="#body" fill="#e4eee9" stroke="none"/>
+    <!-- Muesli: base, oat flakes, clusters, raisins -->
+    <g clip-path="url(#inside)">
+      <path d="M16 70q12-6 24 0t24 0 24 0 24 0v52H16z" fill="#c98a4b"/>
+      <g fill="#f1d9a4" stroke="#8a5a34" stroke-width="2">
+        <ellipse cx="34" cy="78" rx="7" ry="4.5" transform="rotate(-20 34 78)"/>
+        <ellipse cx="62" cy="76" rx="7" ry="4.5" transform="rotate(15 62 76)"/>
+        <ellipse cx="90" cy="80" rx="7" ry="4.5" transform="rotate(-10 90 80)"/>
+        <ellipse cx="48" cy="96" rx="7" ry="4.5" transform="rotate(25 48 96)"/>
+        <ellipse cx="80" cy="100" rx="7" ry="4.5" transform="rotate(-25 80 100)"/>
+        <ellipse cx="30" cy="106" rx="7" ry="4.5" transform="rotate(10 30 106)"/>
+        <ellipse cx="64" cy="112" rx="7" ry="4.5" transform="rotate(-5 64 112)"/>
+        <ellipse cx="98" cy="108" rx="7" ry="4.5" transform="rotate(20 98 108)"/>
+      </g>
+      <g fill="#e2a85a" stroke="#8a5a34" stroke-width="2">
+        <path d="m44 82 7-4 7 3-1 7-8 2z"/>
+        <path d="m70 88 8-3 6 5-3 7-8-1z"/>
+        <path d="m34 92 6-3 5 4-2 5-7 0z"/>
+        <path d="m88 92 6-2 5 4-3 5-6-1z"/>
+      </g>
+      <g fill="#6b3a2a">
+        <ellipse cx="76" cy="81" rx="3" ry="2.2"/>
+        <ellipse cx="60" cy="96" rx="3" ry="2.2"/>
+        <ellipse cx="40" cy="113" rx="3" ry="2.2"/>
+        <ellipse cx="92" cy="118" rx="3" ry="2.2"/>
+      </g>
     </g>
     <use href="#body" fill="none"/>
-    <!-- Glass highlight -->
-    <path d="M32 58v10" fill="none" stroke="#fff" stroke-width="3.5"/>
-    <!-- Thick glass rim -->
-    <rect x="25" y="38" width="78" height="12" rx="5" fill="#d7e6df"/>
-    <path d="M33 44h44" fill="none" stroke="#fff" stroke-width="3"/>
+    <!-- Glass highlights -->
+    <path d="M29 62c0-5 4-8 10-10" fill="none" stroke="#fff" stroke-width="4"/>
+    <path d="M99 62v2" fill="none" stroke="#fff" stroke-width="4"/>
+    <!-- Threaded neck -->
+    <rect x="38" y="30" width="52" height="13" rx="3" fill="#e4eee9"/>
+    <path d="M44 34l6 5M56 34l6 5M68 34l6 5M80 34l6 5" fill="none" stroke="#8fa8a0" stroke-width="2.5"/>
+    <!-- Screw band and lid, lifted and tipped open -->
+    <g transform="rotate(-12 64 14)">
+      <rect x="34" y="6" width="60" height="16" rx="4" fill="#d9a441"/>
+      <path d="M42 10v8M50 10v8M58 10v8M66 10v8M74 10v8M82 10v8" fill="none" stroke="#a7752a" stroke-width="2.5"/>
+    </g>
   </g>
 </svg>
