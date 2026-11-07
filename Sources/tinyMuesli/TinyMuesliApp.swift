@@ -7,6 +7,7 @@ struct TinyMuesliApp: App {
     @State private var updater: Updater
     @State private var permissions: Permissions
     @State private var onboarding: Onboarding
+    @State private var chats = ChatViewer()
 
     init() {
         let model = AppModel()
@@ -23,7 +24,7 @@ struct TinyMuesliApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(model: model, updater: updater, permissions: permissions, onboarding: onboarding)
+            MenuContent(model: model, updater: updater, permissions: permissions, onboarding: onboarding, chats: chats)
         } label: {
             Image(systemName: menuBarSymbol)
         }
@@ -43,6 +44,7 @@ private struct MenuContent: View {
     let updater: Updater
     let permissions: Permissions
     let onboarding: Onboarding
+    let chats: ChatViewer
 
     var body: some View {
         @Bindable var model = model
@@ -104,7 +106,7 @@ private struct MenuContent: View {
         ForEach(model.recentDays) { day in
             Section(day.title) {
                 ForEach(day.meetings, id: \.folder) { meeting in
-                    Button(meeting.title) { NSWorkspace.shared.open(meeting.folder) }
+                    Button(meeting.title) { chats.open(meeting.folder, title: meeting.title) }
                         .badge(meeting.isOngoing ? Text(OngoingPill.label) : meeting.length.map { Text($0) })
                 }
             }
