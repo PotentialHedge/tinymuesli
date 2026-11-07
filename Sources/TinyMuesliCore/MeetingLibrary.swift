@@ -80,7 +80,7 @@ public struct MeetingLibrary: Sendable {
         return try encoder.encode(value)
     }
 
-    static func id(of folder: URL) -> String {
+    public static func id(of folder: URL) -> String {
         folder.pathComponents.suffix(3).joined(separator: "/")
     }
 

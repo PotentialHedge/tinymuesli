@@ -539,6 +539,16 @@ private struct ChatView: View {
                 }
             }
             ToolbarItem {
+                Menu {
+                    ForEach(ChatHandoff.Service.allCases, id: \.self) { service in
+                        Button("Chat in \(service.name)") { openChat(in: service) }
+                    }
+                } label: {
+                    Label("Chat About Meeting", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .help("Chat about this meeting in Claude or ChatGPT, which read it through tinyMuesli's MCP server")
+            }
+            ToolbarItem {
                 Button {
                     NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
                 } label: {
@@ -644,6 +654,13 @@ private struct ChatView: View {
         }
         reloadIfChanged(force: true)
         onEdited()
+    }
+
+    private func openChat(in service: ChatHandoff.Service) {
+        let appInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeDesktopConfig.bundleIdentifier) != nil
+        guard let url = ChatHandoff.url(for: service, meetingID: MeetingLibrary.id(of: folder),
+                                        title: transcript.metadata?.title, appInstalled: appInstalled) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func reloadIfChanged(force: Bool = false) {
