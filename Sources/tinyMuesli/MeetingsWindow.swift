@@ -194,20 +194,14 @@ struct MeetingsWindow: View {
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
         } detail: {
-            if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
-                ChatView(folder: folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
-                         store: model.store, showsDetails: $showsDetails, onEdited: { browser.reload(store: model.store) })
-                    .id(folder)
-                    .navigationTitle(entry.name)
-                    .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
-            } else {
-                ContentUnavailableView("No Meeting Selected", systemImage: "bubble.left.and.bubble.right")
-                    .navigationTitle("Meetings")
-            }
+            detail
+                // The window's minimum width comes from the columns: the sidebar's 240, this 460 and
+                // the inspector's when open. A minimum on the whole split view instead left no room
+                // for the inspector in a narrow window: AppKit squeezed the sidebar to zero and
+                // relaid the window in a loop until it threw.
+                .frame(minWidth: 460)
         }
-        // Before the inspector, not after: a frame around it makes the inspector snap open
-        // instead of sliding.
-        .frame(minWidth: 700, minHeight: 420)
+        .frame(minHeight: 420)
         .inspector(isPresented: $showsDetails) {
             Group {
                 if let folder = browser.selection, session.folder == folder {
@@ -234,6 +228,19 @@ struct MeetingsWindow: View {
                 browser.reload(store: model.store)
                 try? await Task.sleep(for: .seconds(3))
             }
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
+            ChatView(folder: folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
+                     store: model.store, showsDetails: $showsDetails, onEdited: { browser.reload(store: model.store) })
+                .id(folder)
+                .navigationTitle(entry.name)
+                .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
+        } else {
+            ContentUnavailableView("No Meeting Selected", systemImage: "bubble.left.and.bubble.right")
+                .navigationTitle("Meetings")
         }
     }
 
