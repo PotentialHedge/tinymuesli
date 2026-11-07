@@ -148,8 +148,10 @@ func speakerColor(_ speaker: String, speakers: [String], colored: Bool) -> Color
 struct MeetingsWindow: View {
     let model: AppModel
     @Bindable var browser: MeetingBrowser
-    /// Shared with the chat's toolbar button.
-    @AppStorage("meetingDetailsShown") private var showsDetails = false
+    /// Whether the details inspector is open; the chat's toolbar button toggles it. Remembered
+    /// for the next time the window opens.
+    @State private var showsDetails = UserDefaults.standard.bool(forKey: Self.detailsShownKey)
+    private static let detailsShownKey = "meetingDetailsShown"
     @AppStorage("chatSpeakerColors") private var speakerColors = false
     @State private var session = MeetingSession()
 
@@ -194,7 +196,7 @@ struct MeetingsWindow: View {
         } detail: {
             if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
                 ChatView(folder: folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
-                         store: model.store, onEdited: { browser.reload(store: model.store) })
+                         store: model.store, showsDetails: $showsDetails, onEdited: { browser.reload(store: model.store) })
                     .id(folder)
                     .navigationTitle(entry.name)
                     .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
@@ -203,6 +205,9 @@ struct MeetingsWindow: View {
                     .navigationTitle("Meetings")
             }
         }
+        // Before the inspector, not after: a frame around it makes the inspector snap open
+        // instead of sliding.
+        .frame(minWidth: 700, minHeight: 420)
         .inspector(isPresented: $showsDetails) {
             Group {
                 if let folder = browser.selection, session.folder == folder {
@@ -221,7 +226,7 @@ struct MeetingsWindow: View {
             }
             .inspectorColumnWidth(min: 240, ideal: 300, max: 400)
         }
-        .frame(minWidth: 700, minHeight: 420)
+        .onChange(of: showsDetails) { _, shown in UserDefaults.standard.set(shown, forKey: Self.detailsShownKey) }
         .onChange(of: model.recentMeetings) { browser.reload(store: model.store) }
         .task {
             // Picks up meetings and live transcripts written while the window is open.
@@ -388,8 +393,10 @@ private struct ChatView: View {
     /// The sidebar's search: highlighted, with buttons to step through the matches.
     let highlight: String
     let store: MeetingStore
+    @Binding var showsDetails: Bool
     let onEdited: () -> Void
-    @AppStorage("meetingDetailsShown") private var showsDetails = false
+    /// System Settings → Accessibility → Display → Reduce motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var transcript: ChatTranscript { session.folder == folder ? session.transcript : ChatTranscript(metadata: nil, messages: []) }
     private var suggestions: [VoiceMatcher.Suggestion] { session.folder == folder ? session.suggestions : [] }
     @State private var renameError: String?
@@ -460,7 +467,7 @@ private struct ChatView: View {
                         Label(liveLabel, systemImage: "waveform")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .symbolEffect(.variableColor.iterative, isActive: transcript.metadata?.status == .recording)
+                            .symbolEffect(.variableColor.iterative, isActive: transcript.metadata?.status == .recording && !reduceMotion)
                             .padding(.top, 16)
                     }
                     Color.clear.frame(height: 12).id("bottom")
@@ -481,18 +488,18 @@ private struct ChatView: View {
             .onChange(of: transcript.messages.count) { old, new in
                 // Follow a live meeting, like a chat does.
                 if isLive, old > 0, new > old, query.isEmpty {
-                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                    withAnimation(motion(.default)) { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 // Opened from a search: go to the first match once the transcript is in.
                 if old == 0, let first = matchIDs.first { proxy.scrollTo(first, anchor: .center) }
             }
             .onChange(of: query) {
                 currentMatch = 0
-                if let first = matchIDs.first { withAnimation { proxy.scrollTo(first, anchor: .center) } }
+                if let first = matchIDs.first { withAnimation(motion(.default)) { proxy.scrollTo(first, anchor: .center) } }
             }
             .onChange(of: currentMatch) {
                 guard matchIDs.indices.contains(currentMatch) else { return }
-                withAnimation { proxy.scrollTo(matchIDs[currentMatch], anchor: .center) }
+                withAnimation(motion(.default)) { proxy.scrollTo(matchIDs[currentMatch], anchor: .center) }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -525,8 +532,10 @@ private struct ChatView: View {
                 .help("Show the transcript files in Finder")
             }
             ToolbarItem {
-                Toggle(isOn: $showsDetails) {
-                    Label("Details", systemImage: "info.circle")
+                Button {
+                    withAnimation(motion(.default)) { showsDetails.toggle() }
+                } label: {
+                    Label("Details", systemImage: showsDetails ? "info.circle.fill" : "info.circle")
                 }
                 .help(showsDetails ? "Hide details" : "Show tags and speakers")
                 .keyboardShortcut("i", modifiers: .command)
@@ -600,6 +609,11 @@ private struct ChatView: View {
 
     private func color(for speaker: String) -> Color {
         speakerColor(speaker, speakers: transcript.speakers, colored: speakerColors)
+    }
+
+    /// No movement when Reduce Motion is on: panels and scrolling jump instead of sliding.
+    private func motion(_ animation: Animation) -> Animation? {
+        reduceMotion ? nil : animation
     }
 
     private func suggestion(for speaker: String) -> VoiceMatcher.Suggestion? {

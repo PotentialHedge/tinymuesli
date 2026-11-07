@@ -185,7 +185,8 @@ final class OnboardingState {
     func go(to next: Step) {
         guard next != step else { return }
         forward = next.rawValue > step.rawValue
-        withAnimation(.smooth(duration: 0.35)) { step = next }
+        // With Reduce Motion, pages fade instead of sliding (see the transition).
+        withAnimation(.smooth(duration: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.2 : 0.35)) { step = next }
     }
 }
 
@@ -198,6 +199,7 @@ private struct OnboardingView: View {
     let finish: () -> Void
 
     typealias Step = OnboardingState.Step
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -213,7 +215,7 @@ private struct OnboardingView: View {
                     ZStack {
                         page(state.step)
                             .id(state.step)
-                            .transition(.asymmetric(
+                            .transition(reduceMotion ? .opacity : .asymmetric(
                                 insertion: .move(edge: state.forward ? .trailing : .leading).combined(with: .opacity),
                                 removal: .move(edge: state.forward ? .leading : .trailing).combined(with: .opacity)
                             ))

@@ -118,6 +118,8 @@ struct PromptGuideView: View {
     let backToSetup: () -> Void
 
     @State private var pulse = false
+    /// With Reduce Motion the ring and arrows hold still.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -137,7 +139,7 @@ struct PromptGuideView: View {
             }
         }
         .ignoresSafeArea()
-        .onAppear { pulse = true }
+        .onAppear { pulse = !reduceMotion }
     }
 
     private func around(_ prompt: CGRect, in size: CGSize) -> some View {
@@ -168,7 +170,7 @@ struct PromptGuideView: View {
                 .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.accentColor.opacity(0.08)))
                 .frame(width: ring.width, height: ring.height)
                 .scaleEffect(pulse ? 1.03 : 1)
-                .opacity(pulse ? 1 : 0.6)
+                .opacity(pulse || reduceMotion ? 1 : 0.6)
                 .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
                 .offset(x: ring.minX, y: ring.minY)
             arrow("arrow.right", at: CGPoint(x: ring.minX - 34, y: ring.midY), nudge: pulse ? 6 : 0)
