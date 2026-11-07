@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: oat-flake waveform</title>
+  <rect width="128" height="128" rx="28" fill="#b5562b"/>
+  <g fill="#f5ead7">
+    <rect x="22" y="52" width="12" height="24" rx="6"/>
+    <rect x="40" y="36" width="12" height="56" rx="6"/>
+    <rect x="58" y="24" width="12" height="80" rx="6" fill="#e9b967"/>
+    <rect x="76" y="40" width="12" height="48" rx="6"/>
+    <rect x="94" y="56" width="12" height="16" rx="6"/>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: grain cluster</title>
+  <rect width="128" height="128" rx="28" fill="#f5ead7"/>
+  <g stroke="#f5ead7" stroke-width="5" stroke-linejoin="round">
+    <path d="m26 58 22-20 26 10-8 26-28 4z" fill="#b5562b"/>
+    <path d="m74 48 24 0 10 22-18 16-24-6z" fill="#e9b967"/>
+    <path d="m38 82 28-4 14 22-14 14-26-6z" fill="#d48a4e"/>
+  </g>
+</svg>

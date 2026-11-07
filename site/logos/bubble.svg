@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: speech bubble of oats</title>
+  <rect width="128" height="128" rx="28" fill="#24201b"/>
+  <path d="M28 36q0-10 10-10h52q10 0 10 10v40q0 10-10 10H56l-18 16v-16q-10 0-10-10z" fill="#f5ead7"/>
+  <g fill="#e9b967" stroke="#b5562b" stroke-width="3">
+    <ellipse cx="46" cy="56" rx="8" ry="11" transform="rotate(-20 46 56)"/>
+    <ellipse cx="64" cy="56" rx="8" ry="11"/>
+    <ellipse cx="82" cy="56" rx="8" ry="11" transform="rotate(20 82 56)"/>
+  </g>
+</svg>

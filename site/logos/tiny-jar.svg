@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: geometric jar</title>
+  <rect width="128" height="128" rx="28" fill="#b5562b"/>
+  <rect x="34" y="28" width="60" height="10" rx="5" fill="#f5ead7" transform="rotate(-12 64 33)"/>
+  <rect x="38" y="46" width="52" height="8" rx="4" fill="#f5ead7"/>
+  <path d="M40 60h48v26q0 18-18 18H58q-18 0-18-18z" fill="#f5ead7"/>
+  <g fill="#b5562b"><circle cx="54" cy="76" r="5"/><circle cx="72" cy="72" r="4"/><circle cx="66" cy="90" r="5"/><circle cx="80" cy="88" r="3"/><circle cx="50" cy="92" r="3"/></g>
+</svg>

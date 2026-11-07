@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: bowl</title>
+  <rect width="128" height="128" rx="28" fill="#f5ead7"/>
+  <g fill="#e9b967" stroke="#24201b" stroke-width="3">
+    <ellipse cx="46" cy="52" rx="9" ry="6" transform="rotate(-25 46 52)"/>
+    <ellipse cx="66" cy="44" rx="9" ry="6" transform="rotate(15 66 44)"/>
+    <ellipse cx="84" cy="54" rx="9" ry="6" transform="rotate(-10 84 54)"/>
+  </g>
+  <path d="M20 64h88a44 44 0 0 1-88 0z" fill="#b5562b"/>
+  <rect x="48" y="104" width="32" height="8" rx="4" fill="#24201b"/>
+</svg>

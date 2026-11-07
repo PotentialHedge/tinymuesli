@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img"><title>tinyMuesli: oat flake</title>
+  <rect width="128" height="128" rx="28" fill="#24201b"/>
+  <g transform="rotate(-35 64 64)">
+    <ellipse cx="64" cy="64" rx="26" ry="42" fill="#e9b967"/>
+    <path d="M64 30v68" stroke="#b5562b" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>
