@@ -154,6 +154,7 @@ private func phrase(_ text: String, at start: Double, step: Double = 0.5) -> Phr
 private struct FakeTranscriber: Transcriber {
     var language = "en-US"
     let phrases: [Phrase]
+    func inLanguage(_ language: String) -> Transcriber { FakeTranscriber(language: language, phrases: phrases) }
     func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream { FakeStream(phrases: phrases) }
 }
 

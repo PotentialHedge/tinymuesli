@@ -25,7 +25,17 @@ public final class RecordingSession {
     private let transcriber: Transcriber?
     private let speechDetector: SpeechDetectorFactory?
     private let live: LiveTranscript
-    private var streams: [Track: TranscriptionStream] = [:]
+    private var streams: [Track: LanguageSwitchingStream] = [:]
+    private var monitors: [Track: MonitorBox] = [:]
+    private var checking: Set<Track> = []
+    /// Languages you turned down per track, so they aren't suggested again this meeting.
+    private var declined: [Track: Set<String>] = [:]
+
+    /// Languages that can be suggested (those the engine supports). Empty = no language checks.
+    public var offeredLanguages: [Locale] = []
+    /// Called when a track sounds like it's in another language. Answer with
+    /// `switchLanguage(_:)` or `decline(_:)`.
+    public var onLanguageSuggestion: ((LanguageSuggestion) -> Void)?
 
     /// `speechDetector`: if given, stretches without speech are recorded as silence (see `SpeechGate`).
     public init(store: MeetingStore, app: MeetingApp?, transcriber: Transcriber? = nil,
@@ -118,6 +128,55 @@ public final class RecordingSession {
         }
     }
 
+    /// The language each track is being transcribed in now.
+    public func language(of track: Track) -> String? {
+        streams[track]?.language ?? transcriber?.language
+    }
+
+    /// Transcribes `suggestion.track` in the suggested language from where that language seemed
+    /// to start (or from as far back as audio is kept).
+    public func switchLanguage(_ suggestion: LanguageSuggestion) {
+        switchLanguage(of: suggestion.track, to: suggestion.language, from: suggestion.from)
+    }
+
+    /// Transcribes both tracks in `language` from now on.
+    public func switchLanguage(to language: String) {
+        for track in streams.keys {
+            switchLanguage(of: track, to: language, from: streams[track]!.duration)
+        }
+    }
+
+    public func switchLanguage(of track: Track, to language: String, from time: Double) {
+        guard let stream = streams[track], stream.language != language else { return }
+        let start = stream.switchLanguage(to: language, from: time)
+        live.cut(track, from: start)
+        monitors[track]?.switched(to: language)
+        live.update { $0.languageSwitches.append(LanguageSwitch(track: track, time: start, language: language)) }
+    }
+
+    public func decline(_ suggestion: LanguageSuggestion) {
+        declined[suggestion.track, default: []].insert(suggestion.language)
+    }
+
+    /// The monitor thinks `track` may be in another language: compare languages on its recent audio.
+    private func checkLanguage(of track: Track) {
+        guard !checking.contains(track), let stream = streams[track], let monitor = monitors[track],
+              let start = monitor.windowStart, let audio = stream.audio(from: start) else { return }
+        let offered = offeredLanguages.filter { !(declined[track]?.contains($0.identifier(.bcp47)) ?? false) }
+        guard !offered.isEmpty else { return }
+        checking.insert(track)
+        let (current, text) = (stream.language, monitor.text)
+        Task {
+            defer { checking.remove(track) }
+            guard let suggestion = await LanguageDetector.check(
+                track: track, audio: audio, current: current, text: text, offered: offered
+            ) else { return }
+            // Still recording in the language that was checked, and not turned down meanwhile.
+            guard streams[track]?.language == current, !(declined[track]?.contains(suggestion.language) ?? false) else { return }
+            onLanguageSuggestion?(suggestion)
+        }
+    }
+
     /// Waits for live transcription to catch up with the end of the recording. Tracks whose live
     /// transcription failed are left out, so the final pass transcribes them from the file.
     public func finishLiveTranscription() async -> [Track: [Phrase]] {
@@ -136,8 +195,15 @@ public final class RecordingSession {
     private func tee(for track: Track) -> (@Sendable (AVAudioPCMBuffer) -> Void)? {
         guard let transcriber else { return nil }
         let live = live
-        let stream = transcriber.makeStream { phrase in live.add(phrase, track: track) }
+        let monitor = MonitorBox(language: transcriber.language)
+        let stream = LanguageSwitchingStream(language: transcriber.language, makeTranscriber: transcriber.inLanguage) { phrase in
+            live.add(phrase, track: track)
+            if monitor.add(phrase) {
+                Task { @MainActor [weak self] in self?.checkLanguage(of: track) }
+            }
+        }
         streams[track] = stream
+        monitors[track] = monitor
         return { stream.append($0) }
     }
 
@@ -162,4 +228,26 @@ public enum RecordingError: Error, CustomStringConvertible {
         case .nothingToRecord(let reasons): "Couldn't record anything. " + reasons.joined(separator: " ")
         }
     }
+}
+
+/// A `LanguageMonitor` that phrases can be added to from any thread.
+private final class MonitorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var monitor: LanguageMonitor
+
+    init(language: String) {
+        monitor = LanguageMonitor(language: language)
+    }
+
+    /// True when it's time to check the language.
+    func add(_ phrase: Phrase) -> Bool {
+        lock.withLock { monitor.add(phrase) != nil }
+    }
+
+    func switched(to language: String) {
+        lock.withLock { monitor.switched(to: language) }
+    }
+
+    var windowStart: Double? { lock.withLock { monitor.windowStart } }
+    var text: String { lock.withLock { monitor.text } }
 }

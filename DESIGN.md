@@ -18,7 +18,8 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
 | System audio | Core Audio process taps (no Screen Recording permission) |
 | Mic | Separate track, voice processing on (echo cancellation) |
 | Transcription | Apple `SpeechAnalyzer` / `SpeechTranscriber`: on-device, OS-managed models (the OS downloads a language's model on first use via `AssetInventory`; not counted in our size). Behind a `Transcriber` protocol (a stream: append audio, get timed phrases) so Parakeet/Whisper can be added later |
-| Languages | Picker in the menu: English, de, fr, es, it, pt, nl, the Nordic languages, pl and zh, filtered to `SpeechTranscriber.supportedLocales` at runtime (on macOS 26.6: en, de, fr, es, it, pt and zh variants). One entry per language (Simplified and Traditional Chinese stay separate), defaulting to the variant for the Mac's region if there is one, else the language's main one; a second Variant picker offers the others. The CLI's `--language` takes any variant. Default: the system language, else en-US. No auto-detection: the engine needs a locale |
+| Languages | Picker in the menu: English, de, fr, es, it, pt, nl, the Nordic languages, pl and zh, filtered to `SpeechTranscriber.supportedLocales` at runtime (on macOS 26.6: en, de, fr, es, it, pt and zh variants). One entry per language (Simplified and Traditional Chinese stay separate), defaulting to the variant for the Mac's region if there is one, else the language's main one; a second Variant picker offers the others. The CLI's `--language` takes any variant. Default: the system language, else en-US |
+| Language changes | The engine needs a locale and can't identify languages, so each track is watched while recording (`LanguageMonitor`): a check runs when the last 30 s of words score below 0.6 confidence, or when NaturalLanguage reads them as another language (some models write a language they don't know out in that language with barely lower confidence: Swiss German scores English speech 0.6–0.8, the English model scores German 0.2–0.4). The check (`LanguageDetector`) transcribes that audio in the current language and up to three candidates (the text's language, then your macOS languages) and suggests one that scores 0.15 higher, or 0.04 higher if the text agrees. You're asked by notification (and in the menu); a switch re-transcribes that track from where the new language started, from the last 5 min of audio kept at 16 kHz (`LanguageSwitchingStream`), and is saved as `language-switches` so a re-run from the audio does the same. The menu's Meeting Language switches both tracks from now |
 | Speaker ID | Mic vs system channel gives Me / Others. FluidAudio's offline pipeline (pyannote segmentation + WeSpeaker embeddings + VBx, CoreML; ~34 MB of models from Hugging Face on first use) diarizes the system track into Speaker 1..n, numbered by first appearance. Words are attributed individually, so a phrase spanning a change of speaker is split |
 | Voice prints | Each meeting's per-speaker embeddings (WeSpeaker, 256 values) go to `speakers.json`. Naming a speaker renames it there too, which makes it a known voice: an unnamed speaker in another meeting whose embedding has a cosine similarity of 0.6 or more to a named one is suggested as that person ("Maybe Ann · Confirm" in the chat, and in the MCP transcript note). On the first meetings, the same person scored 0.65–0.96 across meetings and different people at most 0.49. Each name is suggested for one speaker per meeting at most, closest pairs first. No separate database: the known voices are read from the meetings' files, so they can't drift from them |
 | Track alignment | Both tracks are written against one host clock; gaps (the system tap delivers nothing while the output device is idle) are filled with silence, so t seconds into each file is the same moment |
@@ -63,6 +64,7 @@ end: 2026-11-04T11:02:10+01:00
 duration: 00:32:10
 app: Zoom
 language: en-US
+language-switches: [system 312.5 de-CH]   # optional: track, seconds, language
 speakers: [Me, Speaker 1, Speaker 2]
 tags: [roadmap]                  # optional, as is title: (above date:)
 status: done
@@ -122,8 +124,8 @@ diarization; the OS manages transcription models.
 - **One-word turns:** a lone word that diarization attributes to a different speaker in the middle
   of someone's sentence is smoothed away. That's usually right (boundary noise), but loses a quick
   "yes" from someone else inside one transcriber phrase.
-- **Language auto-detection:** `SpeechTranscriber` needs a locale. Mixed-language meetings need a
-  different engine.
+- **Language changes are asked about, not automatic,** and are per track, not per sentence: a
+  speaker who mixes languages within a sentence is transcribed in the track's current language.
 - Browser-based meetings (Google Meet): the browser using the mic is an ambiguous signal; v1 only shows a prompt.
 
 ## Build order

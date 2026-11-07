@@ -91,6 +91,18 @@ private struct MenuContent: View {
             Button("Stop Recording") { model.stopRecording() }
             Button("Start New Meeting") { model.startNewMeeting() }
             Toggle("Mute Me", isOn: $model.muteMe)
+            if let title = model.languageSuggestionTitle {
+                Button(title) { model.acceptLanguageSuggestion() }
+                Button("Keep Current Language") { model.declineLanguageSuggestion() }
+            }
+            Menu("Meeting Language") {
+                ForEach(model.languageChoices, id: \.self) { choice in
+                    Toggle(choice.name, isOn: Binding(
+                        get: { model.meetingLanguage.map(AppModel.languageName) == choice.name },
+                        set: { if $0 { model.switchMeetingLanguage(to: choice.tag) } }
+                    ))
+                }
+            }
             if model.followCallMute, !model.muteAccessAllowed {
                 Button("Allow Accessibility to Notice When You Mute…") { model.requestMuteAccess() }
             }

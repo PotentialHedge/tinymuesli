@@ -240,6 +240,10 @@ final class AppModel {
             NSWorkspace.shared.open(folder)
         case .deleteMeeting(let folder):
             confirmDelete(folder)
+        case .switchLanguage:
+            acceptLanguageSuggestion()
+        case .keepLanguage:
+            declineLanguageSuggestion()
         }
     }
 
@@ -268,6 +272,11 @@ final class AppModel {
                 if skipSilence, speechDetector == nil { loadSpeechDetector() }  // for the next meeting
                 let session = try RecordingSession(store: store, app: app, transcriber: transcriber,
                                                    speechDetector: skipSilence ? speechDetector : nil)
+                session.offeredLanguages = languages
+                session.onLanguageSuggestion = { [weak self, weak session] suggestion in
+                    guard let self, let session else { return }
+                    self.suggest(suggestion, in: session)
+                }
                 try session.start()
                 lastError = session.warnings.first
                 muteMe = false
@@ -365,6 +374,7 @@ final class AppModel {
     }
 
     private func finish(_ session: RecordingSession) {
+        if languageSuggestion?.session === session { clearLanguageSuggestion() }
         log.notice("Stopping recording of \(session.folder.lastPathComponent, privacy: .public)")
         session.stop()
         lastError = session.warnings.last
@@ -380,6 +390,67 @@ final class AppModel {
         let length = Self.length((session.pausedAt ?? .now).timeIntervalSince(session.startedAt))
         notifications.meetingEnded(Self.title(of: session), folder: session.folder, length: length,
                                    continuableUntil: continuable ? ended?.finishesAt : nil, quietly: quietly)
+    }
+
+    // MARK: - Language
+
+    /// A track of the current meeting sounds like it's in another language; waiting for an answer.
+    private(set) var languageSuggestion: (suggestion: LanguageSuggestion, session: RecordingSession)?
+
+    private func suggest(_ suggestion: LanguageSuggestion, in session: RecordingSession) {
+        guard case .recording(let current, _) = status, current === session else { return }
+        languageSuggestion = (suggestion, session)
+        let language = Self.languageName(suggestion.language)
+        let currentName = session.language(of: suggestion.track).map(Self.languageName) ?? "another language"
+        let who = suggestion.track == .mic ? "You seem" : "The others seem"
+        notifications.suggestLanguage(
+            title: "\(who) to be speaking \(language)",
+            body: "The transcript is in \(currentName). Switch to \(language)? It's redone from \(TranscriptRenderer.timestamp(suggestion.from))."
+        )
+    }
+
+    /// Menu wording for the pending suggestion, e.g. "Switch Others to German".
+    var languageSuggestionTitle: String? {
+        languageSuggestion.map { pending in
+            let who = pending.suggestion.track == .mic ? "Me" : "Others"
+            return "Switch \(who) to \(Self.languageName(pending.suggestion.language))"
+        }
+    }
+
+    func acceptLanguageSuggestion() {
+        guard let pending = languageSuggestion else { return }
+        pending.session.switchLanguage(pending.suggestion)
+        clearLanguageSuggestion()
+    }
+
+    func declineLanguageSuggestion() {
+        guard let pending = languageSuggestion else { return }
+        pending.session.decline(pending.suggestion)
+        clearLanguageSuggestion()
+    }
+
+    private func clearLanguageSuggestion() {
+        languageSuggestion = nil
+        notifications.removeLanguageSuggestion()
+    }
+
+    /// The language the current meeting is transcribed in (your track's), for the menu.
+    var meetingLanguage: String? {
+        guard case .recording(let session, _) = status else { return nil }
+        return session.language(of: .mic)
+    }
+
+    /// Transcribes the current meeting in `language` from now on, both tracks.
+    func switchMeetingLanguage(to language: String) {
+        guard case .recording(let session, _) = status else { return }
+        clearLanguageSuggestion()
+        session.switchLanguage(to: language)
+    }
+
+    /// "German" for "de-CH": the variant rarely matters to say which language it is.
+    static func languageName(_ tag: String) -> String {
+        let code = Locale.Language(identifier: tag).languageCode?.identifier ?? tag
+        return Locale.current.localizedString(forLanguageCode: code) ?? tag
     }
 
     // MARK: - Deleting

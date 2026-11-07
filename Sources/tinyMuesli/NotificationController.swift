@@ -4,7 +4,8 @@ import UserNotifications
 
 /// The "Zoom is using your microphone. Record?" prompt. Shortly after another meeting ended, it
 /// also offers to continue that one instead. And the "meeting ended" notice, from which a meeting can
-/// be continued (while that's still possible), opened or deleted.
+/// be continued (while that's still possible), opened or deleted. And, while recording, the offer to
+/// switch the transcript to the language people seem to be speaking.
 @MainActor
 final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     enum Action {
@@ -15,6 +16,9 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         case resumeMeeting(folder: URL)
         case openMeeting(folder: URL)
         case deleteMeeting(folder: URL)
+        /// From the language suggestion: switch, or keep the current language.
+        case switchLanguage
+        case keepLanguage
     }
 
     var onAction: ((Action) -> Void)?
@@ -32,6 +36,10 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     nonisolated private static let openAction = "open"
     nonisolated private static let deleteAction = "delete"
     nonisolated private static let folderKey = "folder"
+    nonisolated private static let languageCategory = "language-suggestion"
+    nonisolated private static let switchLanguageAction = "switch-language"
+    nonisolated private static let keepLanguageAction = "keep-language"
+    nonisolated private static let languageID = "language-suggestion"
 
     /// UNUserNotificationCenter crashes outside an app bundle (e.g. `swift run`).
     private var center: UNUserNotificationCenter? {
@@ -66,6 +74,14 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
                 intentIdentifiers: []
             ),
             UNNotificationCategory(identifier: Self.endedCategory, actions: [open, delete], intentIdentifiers: []),
+            UNNotificationCategory(
+                identifier: Self.languageCategory,
+                actions: [
+                    UNNotificationAction(identifier: Self.switchLanguageAction, title: "Switch Language"),
+                    UNNotificationAction(identifier: Self.keepLanguageAction, title: "Keep Current Language"),
+                ],
+                intentIdentifiers: []
+            ),
         ])
         // Permission is asked for in onboarding (or from the menu), not at launch.
     }
@@ -119,6 +135,21 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: Self.endedID(folder), content: content, trigger: nil))
     }
 
+    /// "The others seem to be speaking German". Replaces an earlier suggestion.
+    func suggestLanguage(title: String, body: String) {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.categoryIdentifier = Self.languageCategory
+        content.interruptionLevel = .timeSensitive  // only useful during the meeting
+        center.add(UNNotificationRequest(identifier: Self.languageID, content: content, trigger: nil))
+    }
+
+    func removeLanguageSuggestion() {
+        center?.removeDeliveredNotifications(withIdentifiers: [Self.languageID])
+    }
+
     func removeMeetingEnded(folder: URL) {
         center?.removeDeliveredNotifications(withIdentifiers: [Self.endedID(folder)])
     }
@@ -133,6 +164,16 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     ) async {
         let actionID = response.actionIdentifier
         let userInfo = response.notification.request.content.userInfo
+        if response.notification.request.content.categoryIdentifier == Self.languageCategory {
+            await MainActor.run {
+                switch actionID {
+                case Self.switchLanguageAction: onAction?(.switchLanguage)
+                case Self.keepLanguageAction: onAction?(.keepLanguage)
+                default: break  // clicking the banner leaves the question open in the menu
+                }
+            }
+            return
+        }
         if let path = userInfo[Self.folderKey] as? String {
             let folder = URL(fileURLWithPath: path, isDirectory: true)
             await MainActor.run {

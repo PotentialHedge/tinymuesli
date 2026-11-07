@@ -45,6 +45,10 @@ public struct AppleSpeechTranscriber: Transcriber {
         }
     }
 
+    public func inLanguage(_ language: String) -> Transcriber {
+        AppleSpeechTranscriber(locale: Locale(identifier: language))
+    }
+
     public func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream {
         AppleTranscriptionStream(locale: locale, onPhrase: onPhrase)
     }

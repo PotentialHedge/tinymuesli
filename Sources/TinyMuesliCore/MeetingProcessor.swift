@@ -54,8 +54,9 @@ public struct MeetingProcessor: Sendable {
             defer { if systemTrack.isTemporary { try? fm.removeItem(at: systemTrack.url) } }
             let (micURL, systemURL) = (micTrack.url, systemTrack.url)
 
-            async let micPhrases = phrases(for: .mic, url: micURL, live: live[.mic], log: log)
-            async let systemPhrases = phrases(for: .system, url: systemURL, live: live[.system], log: log)
+            let switches = metadata.languageSwitches
+            async let micPhrases = phrases(for: .mic, url: micURL, live: live[.mic], switches: switches, log: log)
+            async let systemPhrases = phrases(for: .system, url: systemURL, live: live[.system], switches: switches, log: log)
             let mic = try await micPhrases
             let system = try await systemPhrases
 
@@ -101,11 +102,33 @@ public struct MeetingProcessor: Sendable {
         }
     }
 
-    private func phrases(for track: Track, url: URL, live: [Phrase]?, log: @Sendable (String) -> Void) async throws -> [Phrase] {
+    private func phrases(for track: Track, url: URL, live: [Phrase]?, switches: [LanguageSwitch],
+                         log: @Sendable (String) -> Void) async throws -> [Phrase] {
         if let live { return live }
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         log("Transcribing \(track.rawValue) audio…")
-        return try await transcriber.transcribe(file: url)
+        // Each stretch in its own language, as it was switched while recording.
+        let legs = Self.legs(of: track, switches: switches)
+        var phrases: [Phrase] = []
+        for (index, leg) in legs.enumerated() {
+            let end = index + 1 < legs.count ? legs[index + 1].start : nil
+            let engine = leg.language.map(transcriber.inLanguage) ?? transcriber
+            phrases += try await engine.transcribe(file: url, from: leg.start, to: end)
+        }
+        return phrases
+    }
+
+    /// Where each language starts on `track`; nil language = the transcriber's own.
+    static func legs(of track: Track, switches: [LanguageSwitch]) -> [(start: Double, language: String?)] {
+        var legs: [(start: Double, language: String?)] = [(0, nil)]
+        for change in switches.filter({ $0.track == track }).sorted(by: { $0.time < $1.time }) {
+            if change.time <= legs[legs.count - 1].start {
+                legs[legs.count - 1].language = change.language
+            } else {
+                legs.append((change.time, change.language))
+            }
+        }
+        return legs
     }
 
     private func write(metadata: MeetingMetadata, body: String, to url: URL) throws {
@@ -171,6 +194,14 @@ public final class LiveTranscript: @unchecked Sendable {
     public func add(_ phrase: Phrase, track: Track) {
         lock.withLock {
             phrases[track, default: []].append(phrase)
+            write()
+        }
+    }
+
+    /// Drops the words on `track` from `time` on: they're being transcribed again in another language.
+    public func cut(_ track: Track, from time: Double) {
+        lock.withLock {
+            phrases[track] = phrases[track]?.compactMap { $0.clipped(to: -Double.infinity..<time) }
             write()
         }
     }

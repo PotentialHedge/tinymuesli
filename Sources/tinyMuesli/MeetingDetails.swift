@@ -135,6 +135,17 @@ struct MeetingDetails: View {
 
     // MARK: Info
 
+    /// "German (Switzerland)", or "English, German" for a meeting that switched language.
+    static func languages(start: String, switches: [LanguageSwitch]) -> String {
+        guard !switches.isEmpty else { return Locale.current.localizedString(forIdentifier: start) ?? start }
+        var names: [String] = []
+        for tag in [start] + switches.sorted(by: { $0.time < $1.time }).map(\.language) {
+            let name = AppModel.languageName(tag)
+            if !names.contains(name) { names.append(name) }
+        }
+        return names.joined(separator: ", ")
+    }
+
     private var infoSection: some View {
         Section("Info") {
             if let metadata {
@@ -144,7 +155,7 @@ struct MeetingDetails: View {
                 }
                 if let app = metadata.app { LabeledContent("App", value: app) }
                 if let language = metadata.language {
-                    LabeledContent("Language", value: Locale.current.localizedString(forIdentifier: language) ?? language)
+                    LabeledContent("Language", value: Self.languages(start: language, switches: metadata.languageSwitches))
                 }
                 LabeledContent("Status", value: metadata.status.rawValue.capitalized)
             }

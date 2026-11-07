@@ -10,6 +10,10 @@ public protocol Transcriber: Sendable {
     /// BCP-47 language tag the transcriber is using, e.g. "en-US".
     var language: String { get }
 
+    /// The same engine in another language (a BCP-47 tag the engine supports), for a track that
+    /// switches language partway through.
+    func inLanguage(_ language: String) -> Transcriber
+
     /// `onPhrase` is called (from any thread) as each phrase is finalised.
     func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream
 }
@@ -25,20 +29,31 @@ extension Transcriber {
     /// Transcribes a finished track. Reads the file as the engine asks for it, so memory stays flat
     /// for long meetings.
     public func transcribe(file: URL) async throws -> [Phrase] {
+        try await transcribe(file: file, from: 0, to: nil)
+    }
+
+    /// Transcribes the part of a track from `start` to `end` (seconds; nil = the end). Times in
+    /// the result count from the start of the track.
+    public func transcribe(file: URL, from start: Double, to end: Double?) async throws -> [Phrase] {
         let audio = try AVAudioFile(forReading: file)
         let stream = makeStream(onPhrase: { _ in })
         let format = audio.processingFormat
         let chunk = AVAudioFrameCount(format.sampleRate)  // 1 s
+        let first = min(AVAudioFramePosition(start * format.sampleRate), audio.length)
+        let last = end.map { min(AVAudioFramePosition($0 * format.sampleRate), audio.length) } ?? audio.length
+        audio.framePosition = first
         // Check the position: reading at end-of-file throws instead of returning zero frames.
-        while audio.framePosition < audio.length {
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else { break }
+        while audio.framePosition < last {
+            let frames = AVAudioFrameCount(min(AVAudioFramePosition(chunk), last - audio.framePosition))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { break }
             try audio.read(into: buffer)
             if buffer.frameLength == 0 { break }
             stream.append(buffer)
             // Let the engine keep up instead of decoding the whole file into memory first.
             await (stream as? Backpressured)?.waitForCapacity()
         }
-        return try await stream.finish()
+        let offset = Double(first) / format.sampleRate
+        return try await stream.finish().map { $0.shifted(by: offset) }
     }
 }
 

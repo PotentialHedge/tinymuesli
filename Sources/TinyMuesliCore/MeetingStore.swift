@@ -185,6 +185,8 @@ public struct MeetingMetadata: Sendable, Equatable {
     public var app: String?
     public var status: Status
     public var language: String?
+    /// Where a track changed language mid-meeting (it starts in `language`).
+    public var languageSwitches: [LanguageSwitch] = []
     public var speakers: [String]
     /// Set in the Meetings window; kept when the final pass re-runs.
     public var tags: [String]
@@ -215,6 +217,9 @@ public struct MeetingMetadata: Sendable, Equatable {
         }
         if let app { lines.append("app: \(Self.yamlString(app))") }
         if let language { lines.append("language: \(language)") }
+        if !languageSwitches.isEmpty {
+            lines.append("language-switches: [\(languageSwitches.map(\.frontmatterItem).joined(separator: ", "))]")
+        }
         if !speakers.isEmpty { lines.append("speakers: [\(speakers.map(Self.yamlString).joined(separator: ", "))]") }
         if !tags.isEmpty { lines.append("tags: [\(tags.map(Self.yamlString).joined(separator: ", "))]") }
         lines.append("status: \(status.rawValue)")
@@ -242,6 +247,7 @@ public struct MeetingMetadata: Sendable, Equatable {
         app = values["app"].map(Self.unquote)
         status = values["status"].flatMap(Status.init(rawValue:)) ?? .recorded
         language = values["language"]
+        languageSwitches = values["language-switches"].map(Self.list)?.compactMap(LanguageSwitch.init(frontmatterItem:)) ?? []
         error = values["error"].map(Self.unquote)
         speakers = values["speakers"].map(Self.list) ?? []
         tags = values["tags"].map(Self.list) ?? []
