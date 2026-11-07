@@ -3,7 +3,7 @@ import SwiftUI
 import TinyMuesliCore
 
 /// The welcome window: how tinyMuesli works, the permissions it needs, and which apps to record
-/// without asking. Shows on first launch; "Welcome Guide…" in the menu opens it again.
+/// without asking. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
 ///
 /// It opens in the middle of the screen. While macOS asks for a permission, it moves so that the
 /// system's prompt sits in the middle of it and explains around it what to click (see `PromptGuide`).
@@ -28,7 +28,7 @@ final class Onboarding: NSObject, NSWindowDelegate {
             return
         }
         // On by default: tinyMuesli can only notice meetings while it's running. The last page (and
-        // Settings in the menu) can turn it off.
+        // Settings) can turn it off.
         if !LoginItem.isEnabled, let error = LoginItem.set(true) { model.report(error) }
         show()
     }

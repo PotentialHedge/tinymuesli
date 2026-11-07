@@ -25,8 +25,8 @@ public enum AgentPrompt {
             \(jsonConfig(binaryPath: binaryPath))
 
         If you are the Claude desktop or web app, you can't edit your own MCP configuration. Don't try, \
-        and don't send me to a config file: tell me to choose "Add to Claude Desktop…" in the tinyMuesli \
-        menu bar menu. It adds the server and restarts Claude for me.
+        and don't send me to a config file: tell me to open tinyMuesli's Settings (Settings… in its menu \
+        bar menu), go to Assistants and click Add… next to Claude. It adds the server and restarts Claude for me.
 
         Don't change anything else. Then call list_meetings to check that it works, and tell me if I \
         need to restart you before the tools appear.

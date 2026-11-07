@@ -792,14 +792,14 @@ final class AppModel {
             let alert = NSAlert()
             if running.contains(where: { !$0.isTerminated }) {
                 alert.messageText = "Claude didn't quit"
-                alert.informativeText = "Quit Claude, then choose Add to Claude Desktop again."
+                alert.informativeText = "Quit Claude, then click Add… next to Claude in Settings again."
             } else {
                 do {
                     try ClaudeDesktopConfig.install(binaryPath: binary)
                     alert.messageText = "Added tinyMuesli to Claude"
                     alert.informativeText = """
                         Ask Claude about your meetings in any chat. For better answers, paste the prompt from \
-                        Copy Prompt for Agent into your Claude settings or a project's instructions.
+                        Settings › Assistants › Copy Prompt into your Claude settings or a project's instructions.
                         """
                     if !running.isEmpty, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeDesktopConfig.bundleIdentifier) {
                         try? await NSWorkspace.shared.openApplication(at: url, configuration: .init())

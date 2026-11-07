@@ -36,6 +36,10 @@ struct TinyMuesliApp: App {
         .defaultSize(width: 980, height: 720)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
+
+        Settings {
+            SettingsView(model: model, updater: updater, permissions: permissions, onboarding: onboarding)
+        }
     }
 
     /// Flags missing permissions while nothing else is going on.
@@ -54,6 +58,7 @@ private struct MenuContent: View {
     let onboarding: Onboarding
     let browser: MeetingBrowser
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         @Bindable var model = model
@@ -141,11 +146,6 @@ private struct MenuContent: View {
         }
         Button("Show All Meetings…") { showMeetings(nil) }
         Button("Open Meetings Folder") { model.openMeetingsFolder() }
-        Button("Copy Prompt for Agent") { model.copyAgentPrompt() }
-        Button("Add to Claude Desktop…") { model.addToClaudeDesktop() }
-        if AppModel.chatGPTApp != nil {
-            Button("Add to ChatGPT…") { model.addToChatGPT(confirm: true) }
-        }
 
         Divider()
 
@@ -162,35 +162,12 @@ private struct MenuContent: View {
                 }
             }
         }
-        Menu("Settings") {
-            Toggle("Keep Audio After Transcribing", isOn: $model.keepAudio)
-            Toggle("Skip Silence While Recording", isOn: $model.skipSilence)
-            Toggle("Don't Record Me While Muted in the Call", isOn: $model.followCallMute)
-            Button("Meetings Folder: \(model.meetingsFolderName)…") { model.chooseMeetingsFolder() }
-            Toggle("Open at Login", isOn: Binding(
-                get: { LoginItem.isEnabled },
-                set: { enabled in
-                    if let error = LoginItem.set(enabled) { model.report(error) }
-                }
-            ))
-            Divider()
-            Toggle("Check for Updates Automatically", isOn: $updater.checksAutomatically)
+        Button("Settings…") {
+            // A menu bar app isn't frontmost, so the window would open behind others.
+            NSApp.activate()
+            openSettings()
         }
-        Menu {
-            ForEach(Permissions.Kind.allCases) { kind in
-                let state = permissions.state(kind)
-                Button {
-                    onboarding.allow(kind)
-                } label: {
-                    Label("\(kind.title): \(state.label)", systemImage: state.symbol)
-                }
-            }
-            Divider()
-            Button("Welcome Guide…") { onboarding.show() }
-        } label: {
-            // No icon: one would indent every other item in this section.
-            Text(permissions.allGranted ? "Permissions: All Set" : "Permissions: \(permissions.missing.count) Missing")
-        }
+        .keyboardShortcut(",")
         Button("Check for Updates…") { updater.checkForUpdates() }
             .disabled(!updater.canCheckForUpdates)
 

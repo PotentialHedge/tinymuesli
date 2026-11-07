@@ -369,7 +369,7 @@ private struct MeetingRow: View {
 }
 
 /// The meeting app's icon, like a contact picture in Messages.
-private struct AppIcon: View {
+struct AppIcon: View {
     let app: String?
 
     var body: some View {
