@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import TinyMuesliCore
 
-/// The welcome window: how tinyMuesli works, the permissions it needs, and which apps to record
-/// without asking. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
+/// The welcome window: how tinyMuesli works, the permissions it needs, which apps to record
+/// without asking, and the AI apps and Raycast it works with. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
 ///
 /// It opens in the middle of the screen. While macOS asks for a permission, it moves so that the
 /// system's prompt sits in the middle of it and explains around it what to click (see `PromptGuide`).
@@ -584,8 +584,69 @@ private struct ReadyPage: View {
                         }
                     }
                 }
+                if let raycast = Raycast.app {
+                    RaycastCard(icon: NSWorkspace.shared.icon(forFile: raycast.path))
+                }
             }
             .padding(.horizontal, 40)
+        }
+    }
+}
+
+/// Raycast, if it's on this Mac, and whether the tinyMuesli extension is in it.
+private enum Raycast {
+    static var app: URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.raycast.macos")
+    }
+
+    /// The extension isn't in the Raycast Store, so it's installed from the repository.
+    static let extensionPage = URL(string: "https://github.com/PotentialHedge/tinymuesli/tree/main/raycast")!
+
+    /// Raycast keeps each extension in a folder of its own (named after it for one loaded from
+    /// source, otherwise by an id), with the extension's `package.json` inside.
+    static var hasExtension: Bool {
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".config/raycast/extensions")
+        let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return entries.contains { entry in
+            guard let data = try? Data(contentsOf: entry.appending(path: "package.json")),
+                  let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return false }
+            return manifest["name"] as? String == "tinymuesli"
+        }
+    }
+}
+
+private struct RaycastCard: View {
+    let icon: NSImage
+    @State private var installed = Raycast.hasExtension
+
+    var body: some View {
+        Card {
+            HStack(spacing: 14) {
+                Image(nsImage: icon).resizable().frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Search from Raycast").font(.headline)
+                    Text("Find a meeting or anything that was said, and name its speakers, without leaving the keyboard.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                if installed {
+                    Label("Added", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .fontWeight(.medium)
+                } else {
+                    Button("Get Extension…") { NSWorkspace.shared.open(Raycast.extensionPage) }
+                }
+            }
+        }
+        // Pick it up once it's installed while this page is open.
+        .task {
+            while !Task.isCancelled, !installed {
+                try? await Task.sleep(for: .seconds(1))
+                installed = Raycast.hasExtension
+            }
         }
     }
 }
