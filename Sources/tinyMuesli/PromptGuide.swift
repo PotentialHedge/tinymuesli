@@ -75,8 +75,16 @@ struct PromptLocator {
                   let bounds = CGRect(dictionaryRepresentation: dict),
                   bounds.width > 100, bounds.height > 60
             else { return nil }
-            return (number, bounds)
+            return (number, dialog(in: bounds))
         }
+    }
+
+    /// The prompt is a dialog 260 wide, but its window can be bigger, with a clear border of the same
+    /// width on every side (75 on a 1x display, where the window is 410 × 400). Only the dialog counts.
+    private static func dialog(in window: CGRect) -> CGRect {
+        let border = max((window.width - 260) / 2, 0)
+        guard window.height - 2 * border > 60 else { return window }
+        return window.insetBy(dx: border, dy: border)
     }
 }
 
