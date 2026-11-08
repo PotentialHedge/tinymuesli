@@ -2,13 +2,38 @@ import AppKit
 import SwiftUI
 import TinyMuesliCore
 
-/// The inspector beside a meeting's chat: tags, names for the speakers (with suggestions from
-/// voices named in other meetings), and how the chat is drawn.
+/// A name for an unnamed speaker, and why.
+struct SpeakerSuggestion: Equatable {
+    enum Reason: Equatable {
+        /// The voice matches one named in other meetings.
+        case voice(similarity: Double, meetings: Int)
+        /// Someone said the name to them (Apple Intelligence, see `MeetingSuggester`).
+        case heard(quote: String)
+    }
+
+    var speaker: String
+    var name: String
+    var reason: Reason
+
+    var why: String {
+        switch reason {
+        case .voice(let similarity, let meetings):
+            "The voice matches “\(name)” from \(meetings == 1 ? "another meeting" : "\(meetings) other meetings") (similarity \(Int((similarity * 100).rounded()))%)."
+        case .heard(let quote):
+            "Someone seems to speak to them as \(name): “\(quote)”"
+        }
+    }
+}
+
+/// The inspector beside a meeting's chat: title, tags, names for the speakers (with suggestions from
+/// voices named in other meetings and from Apple Intelligence), and how the chat is drawn.
 struct MeetingDetails: View {
     let folder: URL
     let transcript: ChatTranscript
     /// Voices recognised from other meetings (worked out by the chat, which shows them too).
-    let suggestions: [VoiceMatcher.Suggestion]
+    let suggestions: [SpeakerSuggestion]
+    /// Apple Intelligence's title and tags, if it was asked.
+    let suggested: MeetingSuggestions?
     /// Tags used on any meeting, most used first, offered for quick adding.
     let knownTags: [String]
     /// Speaker names used in any meeting, most used first, offered as you type a name.
@@ -38,6 +63,11 @@ struct MeetingDetails: View {
                     .onSubmit(commitTitle)
                     // Clicking elsewhere saves too, not only Return.
                     .onChange(of: titleFocused) { _, focused in if !focused { commitTitle() } }
+                if canEditTags, metadata?.title == nil, title.isEmpty, let suggestedTitle = suggested?.title {
+                    SuggestionRow(text: suggestedTitle, help: "Suggested by Apple Intelligence from the transcript.") {
+                        perform { try MeetingEditor(folder: folder).setTitle(suggestedTitle) }
+                    }
+                }
             }
             tagsSection
             speakersSection
@@ -84,7 +114,24 @@ struct MeetingDetails: View {
                     setTags(tags + newTag.split(separator: ",").map(String.init))
                     newTag = ""
                 }
-            let offered = knownTags.filter { known in !tags.contains { $0.caseInsensitiveCompare(known) == .orderedSame } }.prefix(8)
+            let suggestedTags = (suggested?.tags ?? []).filter { tag in !tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame } }
+            if canEditTags, !suggestedTags.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(suggestedTags, id: \.self) { tag in
+                        Button {
+                            setTags(tags + [tag])
+                        } label: {
+                            Label(tag, systemImage: "sparkles")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.accentColor)
+                        .controlSize(.small)
+                        .help("Suggested by Apple Intelligence. Add “\(tag)”")
+                    }
+                }
+            }
+            let offered = knownTags.filter { !suggestedTags.contains($0) }.filter { known in !tags.contains { $0.caseInsensitiveCompare(known) == .orderedSame } }.prefix(8)
             if canEditTags, !offered.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(Array(offered), id: \.self) { tag in
@@ -190,7 +237,7 @@ private struct SpeakerRow: View {
     let speaker: String
     let stats: String
     let color: Color
-    let suggestion: VoiceMatcher.Suggestion?
+    let suggestion: SpeakerSuggestion?
     let knownNames: [String]
     let canRename: Bool
     let rename: (String) -> Void
@@ -228,7 +275,7 @@ private struct SpeakerRow: View {
             }
             if let suggestion, canRename {
                 HStack(spacing: 6) {
-                    Image(systemName: "waveform")
+                    Image(systemName: icon(suggestion.reason))
                         .foregroundStyle(.secondary)
                     Text("Maybe **\(suggestion.name)**")
                     Spacer()
@@ -236,10 +283,17 @@ private struct SpeakerRow: View {
                         .controlSize(.small)
                 }
                 .font(.callout)
-                .help("The voice matches “\(suggestion.name)” from \(suggestion.meetings == 1 ? "another meeting" : "\(suggestion.meetings) other meetings") (similarity \(Int((suggestion.similarity * 100).rounded()))%).")
+                .help(suggestion.why)
             }
         }
         .onAppear { name = speaker }
+    }
+
+    private func icon(_ reason: SpeakerSuggestion.Reason) -> String {
+        switch reason {
+        case .voice: "waveform"
+        case .heard: "sparkles"
+        }
     }
 
     /// Names already used elsewhere that start with (or contain) what's typed; the voice match first.
@@ -262,6 +316,28 @@ private struct SpeakerRow: View {
             renamed = true
             rename(trimmed)
         }
+    }
+}
+
+/// "✨ Suggested title · Use".
+private struct SuggestionRow: View {
+    let text: String
+    let help: String
+    let use: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.secondary)
+            Text(text)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button("Use", action: use)
+                .controlSize(.small)
+        }
+        .font(.callout)
+        .help(help)
     }
 }
 

@@ -54,6 +54,12 @@ final class AppModel {
     var keepAudio = Settings.keepAudio {
         didSet { Settings.keepAudio = keepAudio }
     }
+    var suggestWithAppleIntelligence = Settings.suggestWithAppleIntelligence {
+        didSet {
+            Settings.suggestWithAppleIntelligence = suggestWithAppleIntelligence
+            if suggestWithAppleIntelligence { suggestForEarlierMeetings() }
+        }
+    }
     var skipSilence = Settings.skipSilence {
         didSet {
             Settings.skipSilence = skipSilence
@@ -116,6 +122,7 @@ final class AppModel {
         Task {
             languages = await AppleSpeechTranscriber.offeredLocales()
             resumeUnfinishedMeetings()
+            suggestForEarlierMeetings()
         }
     }
 
@@ -536,6 +543,7 @@ final class AppModel {
                 let result = try await processor.process(folder: folder, live: phrases)
                 if let warning = result.warnings.first { lastError = warning }
                 outcome = .done
+                suggest(for: folder)
             } catch {
                 if !pendingDeletion.contains(folder) { lastError = "Transcription failed: \(error)" }
             }
@@ -554,6 +562,60 @@ final class AppModel {
                 lastError = "on-meeting-end hook exited with status \(code). See \(hook.log.path)."
             case .couldNotLaunch(let reason):
                 lastError = "Couldn't run the on-meeting-end hook: \(reason)"
+            }
+        }
+    }
+
+    // MARK: - Suggestions
+
+    /// Meetings waiting for Apple Intelligence, one at a time: the model runs one request at once anyway.
+    private var suggestionQueue: [URL] = []
+    private var suggesting = false
+
+    /// Asks Apple Intelligence for a title, tags and speaker names, saved as `suggestions.json`
+    /// (after the final pass, which reset the speakers, so earlier suggestions are replaced).
+    func suggest(for folder: URL) {
+        guard suggestWithAppleIntelligence, MeetingSuggester.isAvailable,
+              !suggestionQueue.contains(where: { Self.samePath($0, folder) }) else { return }
+        suggestionQueue.append(folder)
+        runSuggestions()
+    }
+
+    /// Finished meetings that have never had suggestions, newest first.
+    private func suggestForEarlierMeetings() {
+        guard suggestWithAppleIntelligence, MeetingSuggester.isAvailable else { return }
+        let store = store
+        Task {
+            let folders = await Task.detached(priority: .utility) {
+                store.recentMeetings(limit: 100).filter { folder in
+                    let md = folder.appendingPathComponent(MeetingFiles.transcript)
+                    return !FileManager.default.fileExists(atPath: folder.appendingPathComponent(MeetingFiles.suggestions).path)
+                        && (try? String(contentsOf: md, encoding: .utf8)).flatMap(MeetingMetadata.init(parsing:))?.status == .done
+                }
+            }.value
+            folders.forEach(suggest(for:))
+        }
+    }
+
+    private func runSuggestions() {
+        guard !suggesting, !suggestionQueue.isEmpty else { return }
+        suggesting = true
+        let folder = suggestionQueue.removeFirst()
+        let store = store
+        Task {
+            defer {
+                suggesting = false
+                runSuggestions()
+            }
+            // Not while it's being re-transcribed or deleted; it comes back after its final pass.
+            guard !processing.contains(folder), !pendingDeletion.contains(folder) else { return }
+            let suggester = await Task.detached(priority: .utility) { MeetingSuggester(store: store, excluding: folder) }.value
+            do {
+                try await suggester.suggest(folder: folder)
+                refreshRecentMeetings()
+            } catch {
+                // Quietly: suggestions are a nicety, and the meeting is fine without them.
+                print("Suggestions for \(folder.lastPathComponent) failed: \(error)")
             }
         }
     }

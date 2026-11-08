@@ -6,6 +6,8 @@ public enum MeetingFiles {
     public static let json = "transcript.json"
     /// Voice embeddings per speaker, for recognising recurring speakers later.
     public static let speakers = "speakers.json"
+    /// Title, tags and speaker names suggested by Apple's on-device model (see `MeetingSuggester`).
+    public static let suggestions = "suggestions.json"
     public static let audio = "audio"
     /// The first file of each track; a continued meeting can add `mic-2.caf` etc. (see `TrackSegments`).
     public static let micAudio = "audio/mic.caf"

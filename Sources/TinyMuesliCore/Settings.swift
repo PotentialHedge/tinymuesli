@@ -61,6 +61,13 @@ public enum Settings {
         set { defaults.set(newValue, forKey: "followCallMute") }
     }
 
+    /// Ask Apple Intelligence for each finished meeting's title, tags and speaker names. On by default;
+    /// does nothing on a Mac without it.
+    public static var suggestWithAppleIntelligence: Bool {
+        get { defaults.object(forKey: "suggestWithAppleIntelligence") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "suggestWithAppleIntelligence") }
+    }
+
     /// Where meeting folders go. nil = `MeetingStore.defaultRoot` (~/Meetings).
     public static var meetingsFolder: URL? {
         get { defaults.string(forKey: "meetingsFolder").map { URL(fileURLWithPath: $0, isDirectory: true) } }

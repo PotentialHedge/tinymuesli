@@ -136,6 +136,14 @@ private struct RecordingSettings: View {
                     Text("Keep Audio After Transcribing")
                     Text("Off: only the transcript is kept.")
                 }
+                if AppleIntelligence.status != .notEligible {
+                    Toggle(isOn: $model.suggestWithAppleIntelligence) {
+                        Text("Suggest Titles and Names")
+                        Text(AppleIntelligence.status == .ready
+                             ? "Apple Intelligence suggests a title, tags and speaker names for each meeting, on your Mac."
+                             : "Uses Apple Intelligence, which isn't ready on this Mac yet.")
+                    }
+                }
             }
             Section {
                 ForEach(apps) { app in

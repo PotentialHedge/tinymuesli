@@ -20,6 +20,8 @@ final class MeetingBrowser {
         let preview: String?
         let app: String?
         let tags: [String]
+        /// Apple Intelligence's title, while the meeting has none of its own.
+        let suggestedTitle: String?
     }
 
     /// A meeting found by the search in the sidebar.
@@ -68,7 +70,8 @@ final class MeetingBrowser {
                     folder: folder, name: summary.title ?? MeetingStore.displayName(of: folder, start: summary.start),
                     start: summary.start, end: summary.end,
                     status: MeetingMetadata.Status(rawValue: summary.status) ?? .done,
-                    speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags
+                    speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags,
+                    suggestedTitle: summary.title == nil ? MeetingSuggestions.load(folder: folder)?.title : nil
                 ))
             }
             await MainActor.run {
@@ -98,7 +101,7 @@ final class MeetingBrowser {
             var found: [URL: Match] = [:]
             for entry in entries {
                 let inText = ChatTranscript.matches(in: bodies[entry.folder] ?? "", query: query)
-                let inName = ([entry.name, entry.app ?? ""] + entry.speakers + entry.tags).contains {
+                let inName = ([entry.name, entry.app ?? "", entry.suggestedTitle ?? ""] + entry.speakers + entry.tags).contains {
                     $0.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 }
                 if inText.count > 0 || inName { found[entry.folder] = Match(count: inText.count, excerpt: inText.excerpt) }
@@ -128,7 +131,21 @@ final class MeetingSession {
     private(set) var folder: URL?
     var transcript = ChatTranscript(metadata: nil, messages: [])
     /// Voices recognised from other meetings, for speakers that aren't named yet.
-    var suggestions: [VoiceMatcher.Suggestion] = []
+    var voices: [VoiceMatcher.Suggestion] = []
+    /// Apple Intelligence's title, tags and speaker names (`suggestions.json`).
+    var suggested: MeetingSuggestions?
+    @ObservationIgnored var suggestedModified: Date?
+
+    /// A name for each unnamed speaker: the voice match if there is one, else a name someone said to them.
+    var suggestions: [SpeakerSuggestion] {
+        var result = voices.map { SpeakerSuggestion(speaker: $0.speaker, name: $0.name, reason: .voice(similarity: $0.similarity, meetings: $0.meetings)) }
+        for heard in suggested?.speakers ?? [] where VoiceMatcher.isPlaceholder(heard.speaker)
+            && transcript.speakers.contains(heard.speaker) && !transcript.speakers.contains(heard.name)
+            && !result.contains(where: { $0.speaker == heard.speaker || $0.name == heard.name }) {
+            result.append(SpeakerSuggestion(speaker: heard.speaker, name: heard.name, reason: .heard(quote: heard.quote)))
+        }
+        return result
+    }
     /// Bumped after an edit in the inspector, so the chat reloads at once.
     var editCount = 0
     @ObservationIgnored var modified: Date?
@@ -137,8 +154,10 @@ final class MeetingSession {
         guard folder != self.folder else { return }
         self.folder = folder
         transcript = ChatTranscript(metadata: nil, messages: [])
-        suggestions = []
+        voices = []
+        suggested = nil
         modified = nil
+        suggestedModified = nil
     }
 }
 
@@ -242,7 +261,7 @@ struct MeetingsWindow: View {
     @ViewBuilder private var inspector: some View {
         if let folder = browser.selection, session.folder == folder {
             MeetingDetails(
-                folder: folder, transcript: session.transcript, suggestions: session.suggestions,
+                folder: folder, transcript: session.transcript, suggestions: session.suggestions, suggested: session.suggested,
                 knownTags: knownTags, knownNames: knownNames, speakerColors: $speakerColors,
                 color: { [session, speakerColors] in speakerColor($0, speakers: session.transcript.speakers, colored: speakerColors) },
                 onEdited: {
@@ -293,9 +312,17 @@ private struct MeetingRow: View {
             AppIcon(app: entry.app)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(entry.name)
-                        .font(.headline)
-                        .lineLimit(1)
+                    if let suggested = entry.suggestedTitle {
+                        Text("\(Image(systemName: "sparkles")) \(suggested)")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .help("Suggested by Apple Intelligence. Use it, or give your own, in the meeting's details.")
+                    } else {
+                        Text(entry.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 4)
                     if isOngoing {
                         Text("Live")
@@ -418,7 +445,7 @@ private struct ChatView: View {
     /// System Settings → Accessibility → Display → Reduce motion.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var transcript: ChatTranscript { session.folder == folder ? session.transcript : ChatTranscript(metadata: nil, messages: []) }
-    private var suggestions: [VoiceMatcher.Suggestion] { session.folder == folder ? session.suggestions : [] }
+    private var suggestions: [SpeakerSuggestion] { session.folder == folder ? session.suggestions : [] }
     @State private var renameError: String?
     /// Index into `matchIDs` of the match scrolled to.
     @State private var currentMatch = 0
@@ -586,7 +613,7 @@ private struct ChatView: View {
             let found = await Task.detached(priority: .userInitiated) {
                 VoiceMatcher(store: store).suggestions(for: folder)
             }.value
-            if session.folder == folder { session.suggestions = found }
+            if session.folder == folder { session.voices = found }
         }
         .alert("Couldn't Rename", isPresented: Binding(get: { renameError != nil }, set: { if !$0 { renameError = nil } })) {
             Button("OK") {}
@@ -660,7 +687,7 @@ private struct ChatView: View {
         reduceMotion ? nil : animation
     }
 
-    private func suggestion(for speaker: String) -> VoiceMatcher.Suggestion? {
+    private func suggestion(for speaker: String) -> SpeakerSuggestion? {
         suggestions.first { $0.speaker == speaker }
     }
 
@@ -700,6 +727,12 @@ private struct ChatView: View {
     }
 
     private func reloadIfChanged(force: Bool = false) {
+        let suggestionsFile = folder.appendingPathComponent(MeetingFiles.suggestions)
+        let suggestedModified = try? suggestionsFile.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        if force || suggestedModified != session.suggestedModified {
+            session.suggestedModified = suggestedModified
+            session.suggested = MeetingSuggestions.load(folder: folder)
+        }
         let urls = [MeetingFiles.transcript, MeetingFiles.json].map(folder.appendingPathComponent)
         let dates = urls.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
         let latest = dates.max()
@@ -722,7 +755,7 @@ private struct Bubble: View {
     let startsGroup: Bool
     let showsSpeakerName: Bool
     /// Shown as "Maybe Ann" with a button that confirms the name.
-    let suggestion: VoiceMatcher.Suggestion?
+    let suggestion: SpeakerSuggestion?
     let confirm: (String) -> Void
     let highlight: String
     let isCurrentMatch: Bool
@@ -734,7 +767,7 @@ private struct Bubble: View {
                 HStack(spacing: 6) {
                     if let suggestion {
                         Text("Maybe \(suggestion.name)")
-                            .help("The voice sounds like \(suggestion.name) from \(suggestion.meetings == 1 ? "another meeting" : "\(suggestion.meetings) other meetings"). This is \(message.speaker) until you confirm.")
+                            .help("\(suggestion.why) This is \(message.speaker) until you confirm.")
                         Button("Confirm") { confirm(suggestion.name) }
                             .buttonStyle(.link)
                             .foregroundStyle(.tint)

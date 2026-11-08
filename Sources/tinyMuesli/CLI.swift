@@ -4,7 +4,7 @@ import TinyMuesliCore
 /// The same binary doubles as a CLI: `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
-    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "mcp", "help", "--help", "-h"]
+    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "mcp", "help", "--help", "-h"]
 
     static func run(_ args: [String]) -> Int32 {
         switch args.first {
@@ -18,6 +18,7 @@ enum CLI {
         case "search": return search(Array(args.dropFirst()))
         case "speakers": return speakers(Array(args.dropFirst()))
         case "update": return update(Array(args.dropFirst()))
+        case "suggest": return suggest(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
         default:
             print(usage)
@@ -46,9 +47,11 @@ enum CLI {
                  [--title TEXT]     Its title; "" removes it
                  [--tags A,B]       Replaces its tags; "" removes them
                  [--speaker OLD=NEW]  Renames a speaker; repeat for more. Two the same name are merged
+          suggest MEETING           Ask Apple Intelligence for a title, tags and speaker names (saved
+                                    as suggestions.json; nothing is changed until you update)
           mcp                       Run the MCP server on stdin/stdout
 
-          list, show, search, speakers and update also take --json. All but record's options and
+          list, show, search, speakers, update and suggest also take --json. All but record's options and
           mcp also take --root DIR.
         """
 
@@ -351,6 +354,27 @@ enum CLI {
         }
         if options.json { return printJSON(meeting) }
         print("\(meeting.title ?? "(no title)")\t\(meeting.tags.joined(separator: ", "))\t\(meeting.speakers.joined(separator: ", "))")
+        return 0
+    }
+
+    private static func suggest(_ args: [String]) -> Int32 {
+        guard let options = LibraryOptions(args), options.positional.count == 1, options.limit == nil else { return usageError() }
+        guard let folder = MeetingLibrary(store: options.store).folder(id: options.positional[0]) else {
+            return fail("error: no meeting \"\(options.positional[0])\" (see tinymuesli list)")
+        }
+        let suggester = MeetingSuggester(store: options.store, excluding: folder)
+        let suggestions: MeetingSuggestions
+        do {
+            suggestions = try wait { try await suggester.suggest(folder: folder) { FileHandle.standardError.write(Data("note: \($0)\n".utf8)) } }
+        } catch {
+            return fail("error: \(error.localizedDescription)")
+        }
+        if options.json { return printJSON(suggestions) }
+        print("title\t\(suggestions.title ?? "-")")
+        print("tags\t\(suggestions.tags.joined(separator: ", "))")
+        for speaker in suggestions.speakers {
+            print("\(speaker.speaker)\tmaybe \(speaker.name)\t“\(speaker.quote)”")
+        }
         return 0
     }
 
