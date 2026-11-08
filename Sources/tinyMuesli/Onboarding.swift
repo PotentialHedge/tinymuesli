@@ -468,6 +468,10 @@ private struct PermissionRow: View {
 
     private func detail(_ state: Permissions.State) -> String {
         switch state {
+        case .denied where kind == .accessibility:
+            // A copy signed differently (an older version or another build) leaves its own switch,
+            // which looks right but doesn't count for this one.
+            "\(kind.purpose) Turn on tinyMuesli in System Settings. Already on? Remove it there with –, then come back here."
         case .denied:
             "\(kind.purpose) Turn on tinyMuesli in System Settings."
         case .granted where kind == .notifications && permissions.notificationsAreTemporary:

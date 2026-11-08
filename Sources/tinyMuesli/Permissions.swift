@@ -146,6 +146,9 @@ final class Permissions {
     }
 
     func openSettings(_ kind: Kind) {
+        // Asking again adds tinyMuesli back to the list if its entry was removed. macOS doesn't
+        // always show its alert again, so the pane opens either way.
+        if kind == .accessibility { CallMute.requestAccess() }
         NSWorkspace.shared.open(kind.settingsURL)
     }
 
