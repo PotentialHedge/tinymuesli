@@ -3,7 +3,7 @@ import SwiftUI
 import TinyMuesliCore
 
 /// The welcome window: how tinyMuesli works, the permissions it needs, which apps to record
-/// without asking, and the AI apps and Raycast it works with. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
+/// without asking, Apple Intelligence (on Macs that have it), and the AI apps and Raycast it works with. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
 ///
 /// It opens in the middle of the screen. While macOS asks for a permission, it moves so that the
 /// system's prompt sits in the middle of it and explains around it what to click (see `PromptGuide`).
@@ -175,8 +175,11 @@ final class Onboarding: NSObject, NSWindowDelegate {
 @Observable
 final class OnboardingState {
     enum Step: Int, CaseIterable {
-        case welcome, permissions, apps, agents, ready
+        case welcome, permissions, apps, intelligence, agents, ready
     }
+
+    /// The pages this Mac gets: Apple Intelligence only where it's supported (Apple silicon).
+    let steps = Step.allCases.filter { $0 != .intelligence || AppleIntelligence.status != .notEligible }
 
     private(set) var step = Step.welcome
     private(set) var forward = true
@@ -237,6 +240,7 @@ private struct OnboardingView: View {
         case .welcome: WelcomePage(meetingsFolder: model.meetingsFolderName)
         case .permissions: PermissionsPage(permissions: permissions, allow: allow, bringToFront: bringToFront)
         case .apps: AppsPage(model: model)
+        case .intelligence: IntelligencePage()
         case .agents: AgentsPage(model: model)
         case .ready: ReadyPage(model: model)
         }
@@ -245,7 +249,7 @@ private struct OnboardingView: View {
     private var footer: some View {
         ZStack {
             HStack(spacing: 8) {
-                ForEach(Step.allCases, id: \.self) { s in
+                ForEach(state.steps, id: \.self) { s in
                     Circle()
                         .fill(s == state.step ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
                         .frame(width: 7, height: 7)
@@ -273,14 +277,15 @@ private struct OnboardingView: View {
         switch state.step {
         case .welcome: "Get Started"
         case .permissions: permissions.allGranted ? "Continue" : "Skip for Now"
-        case .apps, .agents: "Continue"
+        case .apps, .intelligence, .agents: "Continue"
         case .ready: "Done"
         }
     }
 
     private func go(by offset: Int) {
-        guard let next = Step(rawValue: state.step.rawValue + offset) else { return }
-        state.go(to: next)
+        guard let index = state.steps.firstIndex(of: state.step),
+              state.steps.indices.contains(index + offset) else { return }
+        state.go(to: state.steps[index + offset])
     }
 }
 
@@ -647,6 +652,109 @@ private struct RaycastCard: View {
                 try? await Task.sleep(for: .seconds(1))
                 installed = Raycast.hasExtension
             }
+        }
+    }
+}
+
+/// Apple Intelligence's state, and what to change if it's off or stuck (most often: Siri's language
+/// doesn't match the Mac's, so the model never downloads).
+private struct IntelligencePage: View {
+    @State private var status = AppleIntelligence.status
+    @State private var mismatch = AppleIntelligence.languageMismatch
+    @State private var copied = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PageHeader(symbol: "apple.intelligence", title: "Apple Intelligence",
+                       subtitle: "Apple's on-device model lets tinyMuesli work with your meetings without anything leaving your Mac.")
+            VStack(spacing: 10) {
+                Card {
+                    HStack(spacing: 14) {
+                        Image(systemName: "cpu")
+                            .font(.title3)
+                            .foregroundStyle(.tint)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(title).font(.headline)
+                            Text(detail)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 12)
+                        switch status {
+                        case .ready:
+                            Label("Ready", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .fontWeight(.medium)
+                        case .notReady where mismatch == nil:
+                            ProgressView().controlSize(.small)
+                        default:
+                            Button("Open Settings…") { AppleIntelligence.openSettings() }
+                        }
+                    }
+                }
+                if status != .ready, let mismatch {
+                    Card {
+                        HStack(alignment: .top, spacing: 14) {
+                            Image(systemName: "character.bubble")
+                                .font(.title3)
+                                .foregroundStyle(.orange)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Match Siri's language").font(.headline)
+                                Text("Your Mac uses \(mismatch.mac), but Siri is set to \(mismatch.siri). Apple Intelligence only turns on when they're the same: change Siri's language in Apple Intelligence & Siri, or your Mac's in General › Language & Region.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                if status != .ready {
+                    Card {
+                        HStack(spacing: 14) {
+                            Text("Stuck? Your AI agent can check this Mac's settings and walk you through the fix.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Button(copied ? "Copied" : "Copy Prompt for Agent") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(AppleIntelligence.fixPrompt(), forType: .string)
+                                copied = true
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 40)
+        }
+        // Pick up changes made in System Settings, and the download finishing, while this page is open.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                status = AppleIntelligence.status
+                mismatch = AppleIntelligence.languageMismatch
+            }
+        }
+    }
+
+    private var title: String {
+        switch status {
+        case .ready: "Ready to use"
+        case .turnedOff: "Turned off"
+        case .notReady where mismatch != nil: "Waiting for a setting"
+        case .notReady, .notEligible: "Downloading the model"
+        }
+    }
+
+    private var detail: String {
+        switch status {
+        case .ready: "The model is on your Mac."
+        case .turnedOff: "Turn on Apple Intelligence in System Settings. It's optional: recording and transcription work without it."
+        case .notReady where mismatch != nil: "macOS won't download the model until the languages below match."
+        case .notReady, .notEligible: "This can take a while. Keep your Mac on power and Wi-Fi; you can carry on in the meantime."
         }
     }
 }
