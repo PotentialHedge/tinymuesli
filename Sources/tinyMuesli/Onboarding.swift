@@ -36,7 +36,7 @@ final class Onboarding: NSObject, NSWindowDelegate {
         Settings.completedOnboarding = true
         Task {
             await permissions.refreshNow()
-            if !permissions.allGranted { show(at: .permissions) }
+            if !permissions.required.isEmpty { show(at: .permissions) }
         }
     }
 
@@ -44,7 +44,7 @@ final class Onboarding: NSObject, NSWindowDelegate {
     func show(at step: OnboardingState.Step? = nil) {
         if let step {
             state.go(to: step)
-        } else if !permissions.allGranted, state.step.rawValue > OnboardingState.Step.permissions.rawValue {
+        } else if !permissions.required.isEmpty, state.step.rawValue > OnboardingState.Step.permissions.rawValue {
             // Nothing after the permissions page works without them.
             state.go(to: .permissions)
         }
@@ -280,18 +280,30 @@ private struct OnboardingView: View {
                         .controlSize(.large)
                 }
                 Spacer()
-                Button(nextTitle) {
-                    if state.step == .ready { finish() } else { go(by: 1) }
+                if skipping {
+                    // Only Accessibility is missing, after a trip to System Settings: allowed, but plain.
+                    Button("Skip for Now") { go(by: 1) }
+                        .controlSize(.large)
+                        .foregroundStyle(.secondary)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button(nextTitle) {
+                        if state.step == .ready { finish() } else { go(by: 1) }
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    // tinyMuesli can't record without them, so they can't be skipped.
+                    .disabled(state.step == .permissions && !permissions.required.isEmpty)
                 }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                // tinyMuesli can't record without them, so they can't be skipped.
-                .disabled(state.step == .permissions && !permissions.allGranted)
             }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
+    }
+
+    private var skipping: Bool {
+        state.step == .permissions && !permissions.allGranted && permissions.required.isEmpty
     }
 
     private var nextTitle: String {

@@ -109,6 +109,12 @@ final class Permissions {
 
     var allGranted: Bool { missing.isEmpty }
 
+    /// Missing ones onboarding insists on. Accessibility can be skipped once macOS has been asked
+    /// (the user was sent to System Settings): recording works without it, only muting isn't followed.
+    var required: [Kind] {
+        missing.filter { $0 != .accessibility || accessibility == .notDetermined }
+    }
+
     func refresh() {
         Task { await refreshNow() }
     }
