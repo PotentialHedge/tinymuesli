@@ -760,6 +760,8 @@ private struct Bubble: View {
     let highlight: String
     let isCurrentMatch: Bool
     let showsTime: Bool
+    @State private var namingOther = false
+    @State private var otherName = ""
 
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
@@ -772,6 +774,19 @@ private struct Bubble: View {
                             .buttonStyle(.link)
                             .foregroundStyle(.tint)
                             .help("Name \(message.speaker) “\(suggestion.name)” in this meeting")
+                        Button("Other Name…") {
+                            otherName = suggestion.name
+                            namingOther = true
+                        }
+                        .buttonStyle(.link)
+                        .foregroundStyle(.secondary)
+                        .help("Give \(message.speaker) a different name in this meeting")
+                        .popover(isPresented: $namingOther, arrowEdge: .bottom) {
+                            OtherNameForm(speaker: message.speaker, name: $otherName) { name in
+                                namingOther = false
+                                confirm(name)
+                            }
+                        }
                     } else {
                         Text(message.speaker)
                     }
@@ -820,6 +835,40 @@ private struct Bubble: View {
             search = range.upperBound..<text.endIndex
         }
         return text
+    }
+}
+
+/// The popover behind "Other Name…": a field prefilled with the suggestion, renamed on Return.
+private struct OtherNameForm: View {
+    let speaker: String
+    @Binding var name: String
+    let rename: (String) -> Void
+    @FocusState private var focused: Bool
+
+    private var cleaned: String { MeetingEditor.clean(name) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Name \(speaker)")
+                .font(.headline)
+            TextField("Name", text: $name)
+                .frame(width: 200)
+                .focused($focused)
+                .onSubmit(submit)
+            HStack {
+                Spacer()
+                Button("Rename", action: submit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(cleaned.isEmpty)
+            }
+        }
+        .padding(12)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard !cleaned.isEmpty else { return }
+        rename(cleaned)
     }
 }
 
