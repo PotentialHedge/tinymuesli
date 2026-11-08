@@ -99,15 +99,19 @@ final class Permissions {
     var allGranted: Bool { missing.isEmpty }
 
     func refresh() {
+        Task { await refreshNow() }
+    }
+
+    /// Like `refresh`, but returns once the notifications state (which macOS reports asynchronously)
+    /// is known too.
+    func refreshNow() async {
         let mic = Self.microphoneState(), system = Self.systemAudioState()
         if microphone != mic { microphone = mic }
         if systemAudio != system { systemAudio = system }
         guard Self.center != nil else { return }
-        Task {
-            let (state, temporary) = await Self.notificationState()
-            if notifications != state { notifications = state }
-            if notificationsAreTemporary != temporary { notificationsAreTemporary = temporary }
-        }
+        let (state, temporary) = await Self.notificationState()
+        if notifications != state { notifications = state }
+        if notificationsAreTemporary != temporary { notificationsAreTemporary = temporary }
     }
 
     /// Asks for it if the user hasn't been asked yet; otherwise opens System Settings, since macOS

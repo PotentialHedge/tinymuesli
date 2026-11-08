@@ -3,7 +3,8 @@ import SwiftUI
 import TinyMuesliCore
 
 /// The welcome window: how tinyMuesli works, the permissions it needs, which apps to record
-/// without asking, Apple Intelligence (on Macs that have it), and the AI apps and Raycast it works with. Shows on first launch; "Show Welcome Guide…" in Settings › Permissions opens it again.
+/// without asking, Apple Intelligence (on Macs that have it), and the AI apps and Raycast it works with. Shows on first launch, and at the permissions page on every launch until they're all allowed;
+/// "Show Welcome Guide…" in Settings › Permissions opens it again.
 ///
 /// It opens in the middle of the screen. While macOS asks for a permission, it moves so that the
 /// system's prompt sits in the middle of it and explains around it what to click (see `PromptGuide`).
@@ -19,23 +20,31 @@ final class Onboarding: NSObject, NSWindowDelegate {
         self.permissions = permissions
     }
 
-    /// On first launch, including a reinstall that kept the meetings. Someone upgrading from a version
-    /// without onboarding already has settings and permissions; for them the menu shows anything missing.
+    /// On first launch, including a reinstall that kept the meetings. After that, at the permissions
+    /// page for as long as one is missing: tinyMuesli can't record a meeting without all of them.
     func showIfNeeded() {
-        guard !Settings.completedOnboarding else { return }
-        if !Settings.isFirstLaunch {
-            Settings.completedOnboarding = true
-            return
+        if !Settings.completedOnboarding, Settings.isFirstLaunch {
+            // On by default: tinyMuesli can only notice meetings while it's running. The last page (and
+            // Settings) can turn it off.
+            if !LoginItem.isEnabled, let error = LoginItem.set(true) { model.report(error) }
+            return show()
         }
-        // On by default: tinyMuesli can only notice meetings while it's running. The last page (and
-        // Settings) can turn it off.
-        if !LoginItem.isEnabled, let error = LoginItem.set(true) { model.report(error) }
-        show()
+        // Someone upgrading from a version without onboarding only sees it if a permission is missing.
+        Settings.completedOnboarding = true
+        Task {
+            await permissions.refreshNow()
+            if !permissions.allGranted { show(at: .permissions) }
+        }
     }
 
     /// Opens the window in the middle of the screen (or brings it forward, where it is).
     func show(at step: OnboardingState.Step? = nil) {
-        if let step { state.go(to: step) }
+        if let step {
+            state.go(to: step)
+        } else if !permissions.allGranted, state.step.rawValue > OnboardingState.Step.permissions.rawValue {
+            // Nothing after the permissions page works without them.
+            state.go(to: .permissions)
+        }
         if window == nil {
             let view = OnboardingView(
                 model: model, permissions: permissions, state: state,
@@ -163,7 +172,8 @@ final class Onboarding: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Closing early counts too: the menu shows what's still missing and can reopen this.
+        // Closing early counts too: the menu shows what's still missing, and the next launch opens
+        // the permissions page again.
         Settings.completedOnboarding = true
         state.guide = nil
         window = nil
@@ -267,6 +277,8 @@ private struct OnboardingView: View {
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                // tinyMuesli can't record without them, so they can't be skipped.
+                .disabled(state.step == .permissions && !permissions.allGranted)
             }
         }
         .padding(.horizontal, 24)
@@ -276,8 +288,7 @@ private struct OnboardingView: View {
     private var nextTitle: String {
         switch state.step {
         case .welcome: "Get Started"
-        case .permissions: permissions.allGranted ? "Continue" : "Skip for Now"
-        case .apps, .intelligence, .agents: "Continue"
+        case .permissions, .apps, .intelligence, .agents: "Continue"
         case .ready: "Done"
         }
     }
@@ -385,7 +396,7 @@ private struct PermissionsPage: View {
     var body: some View {
         VStack(spacing: 0) {
             PageHeader(symbol: "hand.raised.fill", title: "A few permissions",
-                       subtitle: "tinyMuesli only uses these while it's recording a meeting.")
+                       subtitle: "tinyMuesli needs all of these to record a meeting, and only uses them then.")
             VStack(spacing: 10) {
                 ForEach(Permissions.Kind.allCases) { kind in
                     PermissionRow(kind: kind, permissions: permissions, allow: allow)
