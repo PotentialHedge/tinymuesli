@@ -15,6 +15,8 @@ public struct MeetingSummary: Codable, Sendable, Equatable {
     public var speakers: [String]
     public var tags: [String]
     public var error: String?
+    /// Apple Intelligence's title (`suggestions.json`), only while the meeting has none of its own.
+    public var suggestedTitle: String?
 }
 
 /// One paragraph of a transcript that matched a search.
@@ -70,7 +72,8 @@ public struct MeetingLibrary: Sendable {
         return MeetingSummary(
             id: Self.id(of: folder), path: folder.path, start: metadata.start, end: metadata.end, title: metadata.title, app: metadata.app,
             status: metadata.status.rawValue, language: metadata.language, speakers: metadata.speakers,
-            tags: metadata.tags, error: metadata.error
+            tags: metadata.tags, error: metadata.error,
+            suggestedTitle: metadata.title == nil ? MeetingSuggestions.load(folder: folder)?.title : nil
         )
     }
 

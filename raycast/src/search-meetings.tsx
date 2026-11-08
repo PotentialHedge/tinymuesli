@@ -111,12 +111,15 @@ function MeetingItem({
     <List.Item
       icon={{ value: statusIcon(meeting), tooltip: statusLabel(meeting) }}
       title={meetingName(meeting)}
-      subtitle={showingDetail ? undefined : meeting.title ? meeting.app : undefined}
+      subtitle={showingDetail ? undefined : meeting.title || meeting.suggestedTitle ? meeting.app : undefined}
       keywords={[meeting.app ?? "", ...meeting.tags, ...meeting.speakers].filter(Boolean)}
       accessories={
         showingDetail
           ? [{ text: when }]
           : [
+              ...(meeting.suggestedTitle
+                ? [{ icon: Icon.Stars, tooltip: "Title suggested by Apple Intelligence. Edit Title and Tags to keep it." }]
+                : []),
               ...meeting.tags.slice(0, 3).map((t) => ({ tag: t })),
               ...(length ? [{ text: length, icon: Icon.Clock }] : []),
               { text: when, tooltip: startDate(meeting).toLocaleString() },

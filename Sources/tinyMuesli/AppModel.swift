@@ -670,7 +670,9 @@ final class AppModel {
             let folder = URL(fileURLWithPath: meeting.path)
             if pendingDeletion.contains(where: { Self.samePath($0, folder) }) { continue }
             let day = Self.dayTitle(meeting.start, calendar: calendar)
-            let name = meeting.title ?? MeetingStore.displayName(of: folder, start: meeting.start, calendar: calendar)
+            // Apple Intelligence's title until the meeting gets one of its own, marked like in the meetings list.
+            let name = meeting.title ?? meeting.suggestedTitle.map { "✨ \($0)" }
+                ?? MeetingStore.displayName(of: folder, start: meeting.start, calendar: calendar)
             let entry = RecentMeeting(
                 folder: folder,
                 title: "\(meeting.start.formatted(date: .omitted, time: .shortened)) · \(name)",

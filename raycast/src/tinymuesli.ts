@@ -16,6 +16,8 @@ export interface Meeting {
   start: string;
   end?: string;
   title?: string;
+  /** Apple Intelligence's title, only while the meeting has none of its own. */
+  suggestedTitle?: string;
   app?: string;
   status: "recording" | "transcribing" | "done" | "failed" | string;
   language?: string;

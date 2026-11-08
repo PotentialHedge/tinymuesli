@@ -1,9 +1,10 @@
 import { Color, Icon, Image } from "@raycast/api";
 import { Meeting } from "./tinymuesli";
 
-/** The meeting's title, else its folder name without the timestamp, as the app shows it. */
+/** The meeting's title, else Apple Intelligence's, else its folder name without the timestamp, as the app shows it. */
 export function meetingName(meeting: Meeting): string {
   if (meeting.title) return meeting.title;
+  if (meeting.suggestedTitle) return meeting.suggestedTitle;
   const folder = meeting.id.split("/").pop() ?? meeting.id;
   return folder.replace(/^\d{4}-\d{2}-\d{2} \d{4} (?=.)/, "") || meeting.app || "Meeting";
 }

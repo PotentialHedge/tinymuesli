@@ -224,7 +224,7 @@ function EditMeetingForm({ meeting, meetings, onChange }: MeetingProps) {
         id="title"
         title="Title"
         placeholder={meeting.app ?? "Meeting"}
-        defaultValue={meeting.title ?? ""}
+        defaultValue={meeting.title ?? meeting.suggestedTitle ?? ""}
         info="Leave empty to call it by its app again."
       />
       <Form.TextField

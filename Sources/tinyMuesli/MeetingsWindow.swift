@@ -71,7 +71,7 @@ final class MeetingBrowser {
                     start: summary.start, end: summary.end,
                     status: MeetingMetadata.Status(rawValue: summary.status) ?? .done,
                     speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags,
-                    suggestedTitle: summary.title == nil ? MeetingSuggestions.load(folder: folder)?.title : nil
+                    suggestedTitle: summary.suggestedTitle
                 ))
             }
             await MainActor.run {
