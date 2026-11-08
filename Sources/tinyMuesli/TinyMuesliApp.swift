@@ -120,9 +120,6 @@ private struct MenuContent: View {
                     ))
                 }
             }
-            if model.followCallMute, !model.muteAccessAllowed {
-                Button("Allow Accessibility to Notice When You Mute…") { model.requestMuteAccess() }
-            }
         }
         if let ended = model.ended {
             Button("Continue \(AppModel.title(of: ended.session))") { model.continueMeeting() }
@@ -202,6 +199,7 @@ private struct MenuContent: View {
         case .microphone: "Microphone Access"
         case .systemAudio: "System Audio Recording"
         case .notifications: "Notifications"
+        case .accessibility: "Accessibility to Notice When You Mute"
         }
         return state == .notDetermined ? "Allow \(what)…" : "Turn On \(what) in Settings…"
     }

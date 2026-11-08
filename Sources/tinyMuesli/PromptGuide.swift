@@ -107,6 +107,7 @@ private extension Permissions.Kind {
         case .microphone: "Click “Allow” to let tinyMuesli use the microphone"
         case .systemAudio: "Click “Allow” to let tinyMuesli record system audio"
         case .notifications: "Click “Allow” on the notification"
+        case .accessibility: "Click “Open System Settings”, then turn on tinyMuesli"
         }
     }
 
@@ -115,6 +116,7 @@ private extension Permissions.Kind {
         case .microphone: "That's how your side of the meeting gets into the transcript."
         case .systemAudio: "That's how the other participants get into the transcript. It's only the sound, never your screen."
         case .notifications: "Then tinyMuesli can ask whether to record when a meeting starts."
+        case .accessibility: "Then tinyMuesli sees when you mute yourself in the call, and doesn't record you then."
         }
     }
 }

@@ -100,6 +100,12 @@ final class Onboarding: NSObject, NSWindowDelegate {
     func allow(_ kind: Permissions.Kind) {
         guard permissions.state(kind) == .notDetermined else { return permissions.openSettings(kind) }
         show(at: .permissions)
+        // macOS's alert for it only leads to System Settings and doesn't wait for an answer, so
+        // there's nothing to guide through: the permissions page notices the switch being turned on.
+        if kind == .accessibility {
+            Task { await permissions.request(kind) }
+            return
+        }
         guard state.guide == nil else { return }
 
         let guide = PromptGuide(kind: kind)
@@ -398,7 +404,8 @@ private struct PermissionsPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(symbol: "hand.raised.fill", title: "A few permissions",
+            // No symbol: the four rows need the room.
+            PageHeader(title: "A few permissions",
                        subtitle: "tinyMuesli needs all of these to record a meeting, and only uses them then.")
             VStack(spacing: 10) {
                 ForEach(Permissions.Kind.allCases) { kind in

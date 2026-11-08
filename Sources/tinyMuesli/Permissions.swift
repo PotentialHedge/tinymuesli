@@ -9,7 +9,7 @@ import UserNotifications
 @Observable
 final class Permissions {
     enum Kind: CaseIterable, Identifiable {
-        case microphone, systemAudio, notifications
+        case microphone, systemAudio, notifications, accessibility
         var id: Self { self }
 
         var title: String {
@@ -17,6 +17,7 @@ final class Permissions {
             case .microphone: "Microphone"
             case .systemAudio: "System Audio Recording"
             case .notifications: "Notifications"
+            case .accessibility: "Accessibility"
             }
         }
 
@@ -25,6 +26,7 @@ final class Permissions {
             case .microphone: "Records your side of the meeting."
             case .systemAudio: "Records the other participants, from what your Mac plays. No screen recording."
             case .notifications: "Asks whether to record when a meeting starts."
+            case .accessibility: "Sees when you mute yourself in the call, so that isn't recorded."
             }
         }
 
@@ -33,6 +35,7 @@ final class Permissions {
             case .microphone: "mic.fill"
             case .systemAudio: "speaker.wave.2.fill"
             case .notifications: "bell.badge.fill"
+            case .accessibility: "mic.slash.fill"
             }
         }
 
@@ -45,6 +48,8 @@ final class Permissions {
                 URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!
             case .notifications:
                 URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier ?? "")")!
+            case .accessibility:
+                CallMute.settingsURL
             }
         }
     }
@@ -58,6 +63,7 @@ final class Permissions {
     private(set) var microphone: State
     private(set) var systemAudio: State
     private(set) var notifications: State = .unknown
+    private(set) var accessibility: State
     /// Notifications are allowed but show as temporary banners, so a prompt can slip by unnoticed.
     private(set) var notificationsAreTemporary = false
 
@@ -67,6 +73,7 @@ final class Permissions {
     init() {
         microphone = Self.microphoneState()
         systemAudio = Self.systemAudioState()
+        accessibility = Self.accessibilityState()
         refresh()
         // Settings change behind our back (in System Settings), so look again whenever it matters:
         // when the menu opens, when the app comes forward, and now and then for the menu bar icon.
@@ -88,12 +95,16 @@ final class Permissions {
         case .microphone: microphone
         case .systemAudio: systemAudio
         case .notifications: notifications
+        case .accessibility: accessibility
         }
     }
 
-    /// Permissions that are missing (denied or not asked yet).
+    /// Permissions that are missing (denied or not asked yet). Accessibility only counts while
+    /// "Don't Record Me While Muted in the Call" is on: nothing else needs it.
     var missing: [Kind] {
-        Kind.allCases.filter { [.denied, .notDetermined].contains(state($0)) }
+        Kind.allCases.filter { kind in
+            [.denied, .notDetermined].contains(state(kind)) && (kind != .accessibility || Settings.followCallMute)
+        }
     }
 
     var allGranted: Bool { missing.isEmpty }
@@ -105,7 +116,8 @@ final class Permissions {
     /// Like `refresh`, but returns once the notifications state (which macOS reports asynchronously)
     /// is known too.
     func refreshNow() async {
-        let mic = Self.microphoneState(), system = Self.systemAudioState()
+        let mic = Self.microphoneState(), system = Self.systemAudioState(), ax = Self.accessibilityState()
+        if accessibility != ax { accessibility = ax }
         if microphone != mic { microphone = mic }
         if systemAudio != system { systemAudio = system }
         guard Self.center != nil else { return }
@@ -126,6 +138,9 @@ final class Permissions {
             _ = await SystemAudioPermission.request()
         case .notifications:
             _ = try? await Self.center?.requestAuthorization(options: [.alert, .sound])
+        case .accessibility:
+            // macOS's alert only leads to System Settings, where the switch is turned on.
+            CallMute.requestAccess()
         }
         refresh()
     }
@@ -157,6 +172,12 @@ final class Permissions {
         case .notDetermined: .notDetermined
         case .unknown: .unknown
         }
+    }
+
+    /// macOS doesn't say whether it has asked, so it counts as asked once tinyMuesli has.
+    private static func accessibilityState() -> State {
+        if CallMute.isAllowed { return .granted }
+        return Settings.askedForAccessibility ? .denied : .notDetermined
     }
 
     nonisolated private static func notificationState() async -> (State, Bool) {

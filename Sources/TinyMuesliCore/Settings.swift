@@ -61,6 +61,12 @@ public enum Settings {
         set { defaults.set(newValue, forKey: "followCallMute") }
     }
 
+    /// macOS's Accessibility alert has been shown (it can't be asked whether it has).
+    public static var askedForAccessibility: Bool {
+        get { defaults.bool(forKey: "askedForAccessibility") }
+        set { defaults.set(newValue, forKey: "askedForAccessibility") }
+    }
+
     /// Ask Apple Intelligence for each finished meeting's title, tags and speaker names. On by default;
     /// does nothing on a Mac without it.
     public static var suggestWithAppleIntelligence: Bool {

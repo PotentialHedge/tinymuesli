@@ -18,6 +18,7 @@ public enum CallMute {
     @discardableResult
     public static func requestAccess() -> Bool {
         let key = "AXTrustedCheckOptionPrompt"  // kAXTrustedCheckOptionPrompt, a global Swift 6 won't touch
+        Settings.askedForAccessibility = true
         return AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
