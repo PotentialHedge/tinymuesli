@@ -4,7 +4,7 @@ import TinyMuesliCore
 /// The same binary doubles as a CLI: `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
-    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "mcp", "help", "--help", "-h"]
+    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "mcp", "help", "--help", "-h"]
 
     static func run(_ args: [String]) -> Int32 {
         switch args.first {
@@ -16,6 +16,8 @@ enum CLI {
         case "list": return list(Array(args.dropFirst()))
         case "show": return show(Array(args.dropFirst()))
         case "search": return search(Array(args.dropFirst()))
+        case "speakers": return speakers(Array(args.dropFirst()))
+        case "update": return update(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
         default:
             print(usage)
@@ -39,9 +41,15 @@ enum CLI {
           list [--limit N]          List meetings, most recent first
           show MEETING              Print a meeting's transcript.md (MEETING: an id from list, or a folder)
           search QUERY [--limit N]  Find text in all transcripts
+          speakers MEETING          A meeting's speakers, with the voice from another meeting each sounds like
+          update MEETING            Change a finished meeting (what's left out stays as it is):
+                 [--title TEXT]     Its title; "" removes it
+                 [--tags A,B]       Replaces its tags; "" removes them
+                 [--speaker OLD=NEW]  Renames a speaker; repeat for more. Two the same name are merged
           mcp                       Run the MCP server on stdin/stdout
 
-          list, show and search also take --json. list, show, search and mcp also take --root DIR.
+          list, show, search, speakers and update also take --json. All but record's options and
+          mcp also take --root DIR.
         """
 
     /// Reads the same buttons the app does, to check mute detection during a call. Needs Accessibility
@@ -288,6 +296,61 @@ enum CLI {
         for hit in hits {
             print("\(hit.meeting) [\(hit.timestamp)] \(hit.speaker): \(hit.excerpt)")
         }
+        return 0
+    }
+
+    private static func speakers(_ args: [String]) -> Int32 {
+        guard let options = LibraryOptions(args), options.positional.count == 1, options.limit == nil else { return usageError() }
+        let speakers: [SpeakerInfo]
+        do {
+            speakers = try MeetingLibrary(store: options.store).speakers(id: options.positional[0])
+        } catch {
+            return fail("error: \(error.localizedDescription) (see tinymuesli list)")
+        }
+        if options.json { return printJSON(speakers) }
+        for speaker in speakers {
+            let match = speaker.suggestion.map { "\tsounds like \($0.name) (\(Int(($0.similarity * 100).rounded()))%)" } ?? ""
+            print(speaker.name + match)
+        }
+        return 0
+    }
+
+    private static func update(_ args: [String]) -> Int32 {
+        var title: String?
+        var tags: [String]?
+        var speakers: [String: String] = [:]
+        var rest: [String] = []
+        var i = 0
+        while i < args.count {
+            switch args[i] {
+            case "--title" where i + 1 < args.count:
+                title = args[i + 1]
+                i += 2
+            case "--tags" where i + 1 < args.count:
+                tags = args[i + 1].split(separator: ",").map(String.init)
+                i += 2
+            case "--speaker" where i + 1 < args.count:
+                let pair = args[i + 1]
+                guard let equals = pair.firstIndex(of: "="), equals != pair.startIndex else {
+                    return fail("error: --speaker takes OLD=NEW, e.g. --speaker \"Speaker 1=Ann Lee\"")
+                }
+                speakers[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
+                i += 2
+            default:
+                rest.append(args[i])
+                i += 1
+            }
+        }
+        guard let options = LibraryOptions(rest), options.positional.count == 1, options.limit == nil else { return usageError() }
+        guard title != nil || tags != nil || !speakers.isEmpty else { return fail("error: nothing to change; see tinymuesli help") }
+        let meeting: MeetingSummary
+        do {
+            meeting = try MeetingLibrary(store: options.store).update(id: options.positional[0], title: title, tags: tags, speakers: speakers)
+        } catch {
+            return fail("error: \(error.localizedDescription)")
+        }
+        if options.json { return printJSON(meeting) }
+        print("\(meeting.title ?? "(no title)")\t\(meeting.tags.joined(separator: ", "))\t\(meeting.speakers.joined(separator: ", "))")
         return 0
     }
 

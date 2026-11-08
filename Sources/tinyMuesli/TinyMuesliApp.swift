@@ -32,7 +32,10 @@ struct TinyMuesliApp: App {
 
         Window("Meetings", id: MeetingBrowser.windowID) {
             MeetingsWindow(model: model, browser: browser)
+                .onOpenURL { url in openMeetingLink(url) }
         }
+        // A meeting link opens this window, whether or not it's open already.
+        .handlesExternalEvents(matching: ["\(MeetingLink.scheme)://"])
         .defaultSize(width: 980, height: 720)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
@@ -40,6 +43,14 @@ struct TinyMuesliApp: App {
         Settings {
             SettingsView(model: model, updater: updater, permissions: permissions, onboarding: onboarding)
         }
+    }
+
+    /// `tinymuesli://meeting?id=…`: selects that meeting, if there is one.
+    private func openMeetingLink(_ url: URL) {
+        NSApp.activate()
+        guard let id = MeetingLink.id(from: url), let folder = MeetingLibrary(store: model.store).folder(id: id) else { return }
+        browser.select(folder)
+        browser.reload(store: model.store)
     }
 
     /// Flags missing permissions while nothing else is going on.

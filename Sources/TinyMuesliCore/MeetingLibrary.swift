@@ -27,7 +27,25 @@ public struct SearchHit: Codable, Sendable, Equatable {
     public var excerpt: String
 }
 
-/// Read-only access to the meetings on disk, shared by the CLI and the MCP server.
+/// A speaker of one meeting, as `tinymuesli speakers --json` describes them.
+public struct SpeakerInfo: Codable, Sendable, Equatable {
+    public struct Suggestion: Codable, Sendable, Equatable {
+        public var name: String
+        /// Cosine similarity, 0...1, to two decimals.
+        public var similarity: Double
+        /// How many other meetings that voice was named in.
+        public var meetings: Int
+    }
+
+    public var name: String
+    /// False for the names diarization gives ("Speaker 2", "Others").
+    public var named: Bool
+    /// Only for speakers that aren't named yet.
+    public var suggestion: Suggestion?
+}
+
+/// Access to the meetings on disk, shared by the CLI and the MCP server. Reads, plus the edits
+/// `MeetingEditor` allows (title, tags, speaker names).
 public struct MeetingLibrary: Sendable {
     public let store: MeetingStore
 
@@ -54,6 +72,52 @@ public struct MeetingLibrary: Sendable {
             status: metadata.status.rawValue, language: metadata.language, speakers: metadata.speakers,
             tags: metadata.tags, error: metadata.error
         )
+    }
+
+    public enum UpdateError: LocalizedError, Equatable {
+        case noMeeting(String)
+        case noSpeaker(String, speakers: [String])
+
+        public var errorDescription: String? {
+            switch self {
+            case .noMeeting(let id): "No meeting with id \"\(id)\"."
+            case .noSpeaker(let name, let speakers):
+                "This meeting has no speaker \"\(name)\". Its speakers are: \(speakers.joined(separator: ", "))."
+            }
+        }
+    }
+
+    /// Sets a meeting's title and tags and renames its speakers, all checked before anything is
+    /// written. Nil leaves that part as it is. Shared by the MCP server's `update_meeting` and the
+    /// CLI's `update`. Throws `UpdateError` or `MeetingEditor.EditError`.
+    @discardableResult
+    public func update(id: String, title: String? = nil, tags: [String]? = nil,
+                       speakers: [String: String] = [:]) throws -> MeetingSummary {
+        guard let folder = folder(id: id), let summary = summary(of: folder) else { throw UpdateError.noMeeting(id) }
+        if let unknown = speakers.keys.sorted().first(where: { !summary.speakers.contains($0) }) {
+            throw UpdateError.noSpeaker(unknown, speakers: summary.speakers)
+        }
+        let editor = MeetingEditor(folder: folder)
+        if let title { try editor.setTitle(title) }
+        if let tags { try editor.setTags(tags) }
+        for (old, new) in speakers.sorted(by: { $0.key < $1.key }) {
+            try editor.rename(speaker: old, to: new)
+        }
+        guard let updated = self.summary(of: folder) else { throw CocoaError(.fileReadCorruptFile) }
+        return updated
+    }
+
+    /// A meeting's speakers in transcript order, each with the voice from another meeting it
+    /// sounds like, if any (see `VoiceMatcher`).
+    public func speakers(id: String) throws -> [SpeakerInfo] {
+        guard let folder = folder(id: id), let summary = summary(of: folder) else { throw UpdateError.noMeeting(id) }
+        let suggestions = VoiceMatcher(store: store).suggestions(for: folder)
+        return summary.speakers.map { name in
+            SpeakerInfo(name: name, named: name == SpeakerLabel.me || !VoiceMatcher.isPlaceholder(name),
+                        suggestion: suggestions.first { $0.speaker == name }.map {
+                            SpeakerInfo.Suggestion(name: $0.name, similarity: ($0.similarity * 100).rounded() / 100, meetings: $0.meetings)
+                        })
+        }
     }
 
     /// Finds `query` in transcripts, ignoring case and accents. Newest meetings first, and in

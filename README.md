@@ -55,9 +55,16 @@ build/tinyMuesli.app/Contents/MacOS/tinyMuesli languages              # transcri
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli list                   # meetings, most recent first
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli show "<meeting id>"    # print a transcript
 build/tinyMuesli.app/Contents/MacOS/tinyMuesli search "budget"        # find text in all transcripts
+build/tinyMuesli.app/Contents/MacOS/tinyMuesli speakers "<meeting id>"  # its speakers, and who each sounds like
+build/tinyMuesli.app/Contents/MacOS/tinyMuesli update "<meeting id>" --title "Q4 roadmap" --tags roadmap,acme --speaker "Speaker 1=Ann Lee"
 ```
 
-`list`, `show` and `search` also take `--json`.
+`list`, `show`, `search`, `speakers` and `update` also take `--json`. `update` changes only what you
+give it: `--title ""` removes the title, `--tags ""` removes the tags, and `--speaker` can be repeated.
+
+`open "tinymuesli://meeting?id=<meeting id>"` (with the id URL-encoded) opens that meeting in the
+Meetings window, launching tinyMuesli if it isn't running. The [Raycast extension](raycast/) uses
+both.
 
 `transcribe` re-runs the final pass on a folder that still has its `audio/` (e.g. one recorded
 with audio retention on, or one whose transcription failed).

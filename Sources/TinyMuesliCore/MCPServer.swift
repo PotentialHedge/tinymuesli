@@ -137,25 +137,21 @@ public final class MCPServer {
             return text + (Self.curationNote(folder: folder, id: id, library: library).map { "\n\n---\n" + $0 } ?? "")
         case "update_meeting":
             guard let id = arguments["meeting"] as? String else { throw ToolError(message: "meeting is required") }
-            guard let folder = library.folder(id: id), let summary = library.summary(of: folder) else {
-                throw ToolError(message: "No meeting with id \"\(id)\". list_meetings gives the ids.")
-            }
-            let editor = MeetingEditor(folder: folder)
-            let speakers = arguments["speakers"] as? [String: Any] ?? [:]
-            for old in speakers.keys where !summary.speakers.contains(old) {
-                throw ToolError(message: "This meeting has no speaker \"\(old)\". Its speakers are: \(summary.speakers.joined(separator: ", ")).")
+            var speakers: [String: String] = [:]
+            for (old, new) in arguments["speakers"] as? [String: Any] ?? [:] {
+                guard let new = new as? String else { throw ToolError(message: "Speaker names must be strings.") }
+                speakers[old] = new
             }
             do {
-                if let title = arguments["title"] as? String { try editor.setTitle(title) }
-                if let tags = arguments["tags"] as? [String] { try editor.setTags(tags) }
-                for (old, new) in speakers.sorted(by: { $0.key < $1.key }) {
-                    guard let new = new as? String else { throw ToolError(message: "Speaker names must be strings.") }
-                    try editor.rename(speaker: old, to: new)
-                }
+                return try json(library.update(id: id, title: arguments["title"] as? String,
+                                               tags: arguments["tags"] as? [String], speakers: speakers))
+            } catch MeetingLibrary.UpdateError.noMeeting(let id) {
+                throw ToolError(message: "No meeting with id \"\(id)\". list_meetings gives the ids.")
+            } catch let error as MeetingLibrary.UpdateError {
+                throw ToolError(message: error.localizedDescription)
             } catch let error as MeetingEditor.EditError {
                 throw ToolError(message: error.localizedDescription)
             }
-            return try json(library.summary(of: folder))
         default:
             throw ToolError(message: "Unknown tool \(tool)")
         }

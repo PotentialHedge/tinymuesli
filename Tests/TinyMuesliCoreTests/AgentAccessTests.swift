@@ -31,6 +31,28 @@ private func makeLibrary() throws -> MeetingLibrary {
         #expect(try makeLibrary().meetings(limit: 1).count == 1)
     }
 
+    @Test func updateChecksEverythingBeforeWriting() throws {
+        let library = try makeLibrary()
+        let id = "2026/11/2026-11-03 0900 Zoom"
+        #expect(throws: MeetingLibrary.UpdateError.noSpeaker("Speaker 9", speakers: ["Me", "Speaker 1"])) {
+            try library.update(id: id, title: "Budget", speakers: ["Speaker 9": "Ann"])
+        }
+        #expect(library.meetings().first { $0.id == id }?.title == nil)
+        #expect(throws: MeetingLibrary.UpdateError.noMeeting("2026/11/nope")) { try library.update(id: "2026/11/nope", title: "x") }
+        #expect(throws: MeetingEditor.EditError.notFinished) { try library.update(id: "2026/11/2026-11-04 1030 Zoom", title: "x") }
+
+        let updated = try library.update(id: id, title: "Budget", tags: ["q4"])
+        #expect(updated.title == "Budget")
+        #expect(updated.tags == ["q4"])
+        // Left out: kept.
+        #expect(try library.update(id: id, tags: []).title == "Budget")
+    }
+
+    @Test func listsSpeakersWithoutVoicesAsUnmatched() throws {
+        let speakers = try makeLibrary().speakers(id: "2026/11/2026-11-03 0900 Zoom")
+        #expect(speakers == [SpeakerInfo(name: "Me", named: true), SpeakerInfo(name: "Speaker 1", named: false)])
+    }
+
     @Test func searchIgnoresCaseAndAccentsAndCoversMeetingsInProgress() throws {
         let library = try makeLibrary()
         #expect(library.search("BUDGET").map(\.speaker) == ["Others", "Me"])
@@ -307,5 +329,21 @@ private func makeLibrary() throws -> MeetingLibrary {
         try ClaudeDesktopConfig.install(binaryPath: "/y", at: url)
         let config = try object(Data(contentsOf: url))
         #expect(((config["mcpServers"] as? [String: Any])?["tinymuesli"] as? [String: Any])?["command"] as? String == "/y")
+    }
+}
+
+@Suite struct MeetingLinkTests {
+    @Test func roundTripsIdsWithSpacesAndSlashes() throws {
+        let id = "2026/11/2026-11-04 1030 Zoom (2)"
+        let url = MeetingLink.url(for: id)
+        #expect(url.absoluteString.hasPrefix("tinymuesli://meeting?id="))
+        #expect(MeetingLink.id(from: url) == id)
+        #expect(MeetingLink.id(from: try #require(URL(string: "tinymuesli://meeting?id=2026/11/2026-11-04%201030%20Zoom"))) == "2026/11/2026-11-04 1030 Zoom")
+    }
+
+    @Test func rejectsOtherLinks() throws {
+        #expect(MeetingLink.id(from: try #require(URL(string: "tinymuesli://settings?id=x"))) == nil)
+        #expect(MeetingLink.id(from: try #require(URL(string: "https://meeting?id=x"))) == nil)
+        #expect(MeetingLink.id(from: try #require(URL(string: "tinymuesli://meeting"))) == nil)
     }
 }
