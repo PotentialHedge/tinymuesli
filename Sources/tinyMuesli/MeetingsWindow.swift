@@ -200,34 +200,18 @@ struct MeetingsWindow: View {
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
         } detail: {
-            detail
-                // The window's minimum width comes from the columns: the sidebar's 240, this 460 and
-                // the inspector's when open. A minimum on the whole split view instead left no room
-                // for the inspector in a narrow window: AppKit squeezed the sidebar to zero and
-                // relaid the window in a loop until it threw.
-                .frame(minWidth: 460)
+            // The details inspector shares the chat's column, laid out by SwiftUI: .inspector
+            // widened the window each time it opened (see InspectorPanel).
+            InspectorPanel(isPresented: $showsDetails, contentMinWidth: Self.chatMinWidth, widths: 240...400,
+                           idealWidth: 300, widthKey: "meetingDetailsWidth") {
+                detail
+            } inspector: {
+                inspector
+            }
+            .navigationTitle(selectedEntry?.name ?? "Meetings")
+            .navigationSubtitle(selectedEntry?.start.formatted(date: .abbreviated, time: .shortened) ?? "")
         }
         .frame(minHeight: 420)
-        .inspector(isPresented: $showsDetails) {
-            Group {
-                if let folder = browser.selection, session.folder == folder {
-                    MeetingDetails(
-                        folder: folder, transcript: session.transcript, suggestions: session.suggestions,
-                        knownTags: knownTags, knownNames: knownNames, speakerColors: $speakerColors,
-                        color: { [session, speakerColors] in speakerColor($0, speakers: session.transcript.speakers, colored: speakerColors) },
-                        onEdited: {
-                            session.editCount += 1
-                            browser.reload(store: model.store)
-                        }
-                    )
-                    // A fresh inspector per meeting, so a half-typed name is saved to the right one.
-                    .id(folder)
-                } else {
-                    ContentUnavailableView("No Meeting Selected", systemImage: "info.circle")
-                }
-            }
-            .inspectorColumnWidth(min: 240, ideal: 300, max: 400)
-        }
         .onChange(of: showsDetails) { _, shown in UserDefaults.standard.set(shown, forKey: Self.detailsShownKey) }
         .onChange(of: model.recentMeetings) { browser.reload(store: model.store) }
         .task {
@@ -239,16 +223,37 @@ struct MeetingsWindow: View {
         }
     }
 
+    private static let chatMinWidth: CGFloat = 360
+
+    private var selectedEntry: MeetingBrowser.Entry? {
+        browser.selection.flatMap { folder in visible.first { $0.folder == folder } }
+    }
+
     @ViewBuilder private var detail: some View {
-        if let folder = browser.selection, let entry = visible.first(where: { $0.folder == folder }) {
-            ChatView(folder: folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
+        if let entry = selectedEntry {
+            ChatView(folder: entry.folder, session: session, highlight: browser.matches == nil ? "" : browser.query,
                      store: model.store, showsDetails: $showsDetails, onEdited: { browser.reload(store: model.store) })
-                .id(folder)
-                .navigationTitle(entry.name)
-                .navigationSubtitle(entry.start.formatted(date: .abbreviated, time: .shortened))
+                .id(entry.folder)
         } else {
             ContentUnavailableView("No Meeting Selected", systemImage: "bubble.left.and.bubble.right")
-                .navigationTitle("Meetings")
+        }
+    }
+
+    @ViewBuilder private var inspector: some View {
+        if let folder = browser.selection, session.folder == folder {
+            MeetingDetails(
+                folder: folder, transcript: session.transcript, suggestions: session.suggestions,
+                knownTags: knownTags, knownNames: knownNames, speakerColors: $speakerColors,
+                color: { [session, speakerColors] in speakerColor($0, speakers: session.transcript.speakers, colored: speakerColors) },
+                onEdited: {
+                    session.editCount += 1
+                    browser.reload(store: model.store)
+                }
+            )
+            // A fresh inspector per meeting, so a half-typed name is saved to the right one.
+            .id(folder)
+        } else {
+            ContentUnavailableView("No Meeting Selected", systemImage: "info.circle")
         }
     }
 
