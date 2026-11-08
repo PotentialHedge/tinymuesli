@@ -32,13 +32,26 @@ public enum ChatHandoff {
         /// The services that have tinyMuesli's MCP server.
         public static var withMCPServer: [Service] { allCases.filter(\.hasMCPServer) }
 
-        /// The Claude app, which has tinyMuesli's MCP server, if it's installed; else the web.
+        /// The app, which has tinyMuesli's MCP server, if it's installed; else the web. The ChatGPT
+        /// app's `codex://` scheme is undocumented: it's the URL the app itself builds from a
+        /// `chatgpt.com/?q=` link. Work mode is where it uses local tools from `~/.codex/config.toml`.
         func base(appInstalled: Bool) -> String {
             switch self {
             case .claude: appInstalled ? "claude://claude.ai/new" : "https://claude.ai/new"
-            case .chatGPT: "https://chatgpt.com/"
+            case .chatGPT: appInstalled ? "codex://threads/new" : "https://chatgpt.com/"
             }
         }
+
+        /// The query that carries the prompt, and any other the app needs.
+        func query(prompt: String, appInstalled: Bool) -> [URLQueryItem] {
+            switch self {
+            case .chatGPT where appInstalled: [URLQueryItem(name: "prompt", value: prompt), URLQueryItem(name: "mode", value: "work")]
+            default: [URLQueryItem(name: "q", value: prompt)]
+            }
+        }
+
+        /// A URL whose app, if one handles it, means the app is installed and takes chat links.
+        public var appProbe: URL { URL(string: base(appInstalled: true))! }
     }
 
     /// Names the meeting the way you would (title, else app, and when it was) rather than by id,
@@ -52,7 +65,7 @@ public enum ChatHandoff {
 
     public static func url(for service: Service, prompt: String, appInstalled: Bool) -> URL? {
         guard var components = URLComponents(string: service.base(appInstalled: appInstalled)) else { return nil }
-        components.queryItems = [URLQueryItem(name: "q", value: prompt)]
+        components.queryItems = service.query(prompt: prompt, appInstalled: appInstalled)
         // URLQueryItem leaves "+" alone, which servers read as a space.
         let query = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         components.percentEncodedQuery = query

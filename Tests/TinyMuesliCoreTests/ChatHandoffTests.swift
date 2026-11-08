@@ -19,6 +19,13 @@ import Testing
         #expect(url.absoluteString == "https://chatgpt.com/?q=Q4%20%2B%20roadmap")
     }
 
+    @Test func opensTheChatGPTAppWhenInstalled() throws {
+        let app = try #require(ChatHandoff.url(for: .chatGPT, prompt: "Q4 + roadmap", appInstalled: true))
+        #expect(app.absoluteString == "codex://threads/new?prompt=Q4%20%2B%20roadmap&mode=work")
+        #expect(ChatHandoff.Service.chatGPT.appProbe.scheme == "codex")
+        #expect(ChatHandoff.Service.claude.appProbe.scheme == "claude")
+    }
+
     @Test func opensTheClaudeAppWhenInstalled() throws {
         let app = try #require(ChatHandoff.url(for: .claude, prompt: "hi", appInstalled: true))
         #expect(app.absoluteString == "claude://claude.ai/new?q=hi")

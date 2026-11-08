@@ -685,7 +685,9 @@ private struct ChatView: View {
     }
 
     private func openChat(in service: ChatHandoff.Service) {
-        let appInstalled = Self.appURL(for: .claude) != nil
+        // Asks for the app that opens the service's own scheme, not just its bundle id: the older
+        // ChatGPT app (com.openai.chat) doesn't take codex:// links.
+        let appInstalled = NSWorkspace.shared.urlForApplication(toOpen: service.appProbe) != nil
         guard let metadata = transcript.metadata,
               let url = ChatHandoff.url(for: service, prompt: ChatHandoff.prompt(title: metadata.title, app: metadata.app, start: metadata.start),
                                         appInstalled: appInstalled) else { return }
