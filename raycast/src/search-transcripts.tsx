@@ -3,7 +3,7 @@ import { showFailureToast, usePromise } from "@raycast/utils";
 import { useMemo, useRef, useState } from "react";
 import { AppMissing, TranscriptView } from "./components";
 import { meetingName, shortDate, startDate } from "./format";
-import { listMeetings, Meeting, SearchHit, searchTranscripts } from "./tinymuesli";
+import { listMeetings, Meeting, meetingLink, SearchHit, searchTranscripts } from "./tinymuesli";
 
 const LIMIT = 100;
 
@@ -77,6 +77,13 @@ export default function Command() {
                             title="Show Transcript"
                             icon={Icon.Text}
                             target={<TranscriptView meeting={meeting} meetings={meetings} onChange={onChange} />}
+                          />
+                        )}
+                        {meeting && (
+                          <Action.Open
+                            title="Open in tinyMuesli"
+                            icon={Icon.AppWindowSidebarLeft}
+                            target={meetingLink(meeting.id)}
                           />
                         )}
                         {meeting && (

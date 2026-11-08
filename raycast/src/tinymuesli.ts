@@ -1,9 +1,9 @@
-// Client for tinyMuesli. Reads go through the CLI built into the app (`list`/`search --json`), which
-// finds the meetings folder from the app's setting. Edits go through its MCP server (`mcp`), the
-// one interface that writes, so titles, tags and speaker names are changed exactly as an agent would.
-// Neither talks to the running app, so recording is never disturbed.
+// Client for tinyMuesli, through the CLI built into the app (`list`, `search`, `speakers` and `update`,
+// all with --json). The CLI finds the meetings folder from the app's setting and makes the same edits
+// as the app and its MCP server. It never talks to the running app, so recording is never disturbed.
+// `tinymuesli://meeting?id=…` is the one way in to the app: it opens a meeting in its window.
 import { getPreferenceValues } from "@raycast/api";
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +24,14 @@ export interface Meeting {
   error?: string;
 }
 
+export interface Speaker {
+  name: string;
+  /** False for the names diarization gives ("Speaker 2", "Others"). */
+  named: boolean;
+  /** The voice from another meeting this one sounds like; only for unnamed speakers. */
+  suggestion?: { name: string; similarity: number; meetings: number };
+}
+
 export interface SearchHit {
   /** A meeting id. */
   meeting: string;
@@ -41,7 +49,7 @@ const BINARY_IN_BUNDLE = "Contents/MacOS/tinyMuesli";
 
 let cachedBinary: string | undefined;
 
-/** The tinyMuesli executable: from the preference, else Applications, else Spotlight. */
+/** The tinyMuesli executable: from the preference, else wherever macOS knows the app to be. */
 export function binary(): string {
   const { binary: setting } = getPreferenceValues<Preferences>();
   if (setting?.trim()) {
@@ -51,21 +59,36 @@ export function binary(): string {
     return executable;
   }
   if (cachedBinary && existsSync(cachedBinary)) return cachedBinary;
-  const candidates = [join("/Applications", "tinyMuesli.app"), join(homedir(), "Applications", "tinyMuesli.app")];
+  const lookups = [
+    // LaunchServices: the copy `open` and tinymuesli:// links launch, so the CLI matches the app.
+    // NSWorkspace through JXA asks without launching it, unlike AppleScript's `path to application`.
+    () =>
+      output("/usr/bin/osascript", [
+        "-l",
+        "JavaScript",
+        "-e",
+        `ObjC.import("AppKit"); const url = $.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier("${BUNDLE_ID}"); url.isNil() ? "" : url.path.js`,
+      ]),
+    () => [join("/Applications", "tinyMuesli.app"), join(homedir(), "Applications", "tinyMuesli.app")],
+    // Spotlight, which lags behind a rebuilt or moved app.
+    () => output("/usr/bin/mdfind", [`kMDItemCFBundleIdentifier == "${BUNDLE_ID}"`]),
+  ];
+  for (const lookup of lookups) {
+    for (const app of lookup()) {
+      const executable = join(app, BINARY_IN_BUNDLE);
+      if (existsSync(executable)) return (cachedBinary = executable);
+    }
+  }
+  throw new AppNotFound("tinyMuesli.app wasn't found");
+}
+
+/** A command's output lines, or none if it fails or takes too long. */
+function output(command: string, args: string[]): string[] {
   try {
-    const found = execFileSync("/usr/bin/mdfind", [`kMDItemCFBundleIdentifier == "${BUNDLE_ID}"`], {
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    candidates.push(...found.split("\n").filter(Boolean));
+    return execFileSync(command, args, { encoding: "utf8", timeout: 3000 }).split("\n").filter(Boolean);
   } catch {
-    // Spotlight off or slow: the fixed locations are all we have.
+    return [];
   }
-  for (const app of candidates) {
-    const executable = join(app, BINARY_IN_BUNDLE);
-    if (existsSync(executable)) return (cachedBinary = executable);
-  }
-  throw new AppNotFound("tinyMuesli.app wasn't found in Applications or by Spotlight");
 }
 
 function isDirectory(path: string): boolean {
@@ -85,7 +108,10 @@ function run(args: string[], signal?: AbortSignal): Promise<string> {
       return reject(error);
     }
     execFile(executable, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, signal }, (error, stdout, stderr) => {
-      if (error) reject(stderr.trim() ? new Error(stderr.trim()) : error);
+      if (error) reject(stderr.trim() ? new Error(stderr.trim().replace(/^error: /, "")) : error);
+      // An app from before a command existed prints its usage instead.
+      else if (stdout.startsWith("usage:"))
+        reject(new Error(`This tinyMuesli is too old for “${args[0]}”. Update it.`));
       else resolve(stdout);
     });
   });
@@ -113,77 +139,20 @@ export interface MeetingUpdate {
   speakers?: Record<string, string>;
 }
 
-/** Calls the MCP server's `update_meeting` tool and returns the meeting as it is afterwards. */
-export function updateMeeting(id: string, update: MeetingUpdate): Promise<Meeting> {
-  return new Promise((resolve, reject) => {
-    let executable: string;
-    try {
-      executable = binary();
-    } catch (error) {
-      return reject(error);
-    }
-    const server = spawn(executable, ["mcp"], { stdio: ["pipe", "pipe", "pipe"] });
-    const timeout = setTimeout(() => finish(new Error("tinyMuesli's MCP server didn't answer")), 30_000);
-    let buffer = "";
-    let stderr = "";
-    let done = false;
+export async function listSpeakers(id: string): Promise<Speaker[]> {
+  return JSON.parse(await run(["speakers", id, "--json"]));
+}
 
-    const finish = (error: Error | null, meeting?: Meeting) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timeout);
-      server.stdin.end();
-      server.kill();
-      if (error) reject(error);
-      else resolve(meeting!);
-    };
-    const send = (message: object) => server.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
+/** Changes what's given and returns the meeting as it is afterwards. */
+export async function updateMeeting(id: string, update: MeetingUpdate): Promise<Meeting> {
+  const args = ["update", id, "--json"];
+  if (update.title !== undefined) args.push("--title", update.title);
+  if (update.tags !== undefined) args.push("--tags", update.tags.join(","));
+  for (const [old, name] of Object.entries(update.speakers ?? {})) args.push("--speaker", `${old}=${name}`);
+  return JSON.parse(await run(args));
+}
 
-    server.stdout.setEncoding("utf8");
-    server.stdout.on("data", (chunk: string) => {
-      buffer += chunk;
-      let end: number;
-      while ((end = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, end);
-        buffer = buffer.slice(end + 1);
-        if (!line.trim()) continue;
-        let message;
-        try {
-          message = JSON.parse(line);
-        } catch (error) {
-          return finish(error as Error);
-        }
-        if (message.error) return finish(new Error(message.error.message));
-        if (message.id === 1) {
-          send({ method: "notifications/initialized" });
-          send({
-            id: 2,
-            method: "tools/call",
-            params: { name: "update_meeting", arguments: { meeting: id, ...update } },
-          });
-        } else if (message.id === 2) {
-          const texts: string[] = (message.result?.content ?? []).map((part: { text?: string }) => part.text ?? "");
-          if (message.result?.isError) return finish(new Error(texts.join("\n") || "The update failed"));
-          try {
-            finish(null, JSON.parse(texts[0]));
-          } catch (error) {
-            finish(error as Error);
-          }
-        }
-      }
-    });
-    server.stderr.on("data", (chunk) => (stderr += chunk));
-    server.on("error", (error) => finish(error));
-    server.on("exit", (code) => finish(new Error(stderr.trim() || `tinyMuesli mcp exited with ${code}`)));
-
-    send({
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "raycast-tinymuesli", version: "1.0" },
-      },
-    });
-  });
+/** Opens the meeting in tinyMuesli's Meetings window. */
+export function meetingLink(id: string): string {
+  return `tinymuesli://meeting?id=${encodeURIComponent(id)}`;
 }
