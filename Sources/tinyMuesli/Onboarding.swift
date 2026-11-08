@@ -20,15 +20,18 @@ final class Onboarding: NSObject, NSWindowDelegate {
         self.permissions = permissions
     }
 
-    /// On first launch, including a reinstall that kept the meetings. After that, at the permissions
-    /// page for as long as one is missing: tinyMuesli can't record a meeting without all of them.
+    /// On first launch, including a reinstall that kept the meetings, and again on every launch until
+    /// it's been through (quitting the app while it's open doesn't count). After that, at the
+    /// permissions page for as long as one is missing: tinyMuesli can't record a meeting without all of them.
     func showIfNeeded() {
         if !Settings.completedOnboarding, Settings.isFirstLaunch {
             // On by default: tinyMuesli can only notice meetings while it's running. The last page (and
             // Settings) can turn it off.
             if !LoginItem.isEnabled, let error = LoginItem.set(true) { model.report(error) }
+            Settings.completedOnboarding = false
             return show()
         }
+        if Settings.onboardingInProgress { return show() }
         // Someone upgrading from a version without onboarding only sees it if a permission is missing.
         Settings.completedOnboarding = true
         Task {
@@ -173,7 +176,7 @@ final class Onboarding: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         // Closing early counts too: the menu shows what's still missing, and the next launch opens
-        // the permissions page again.
+        // the permissions page again. (Quitting doesn't close it, so the next launch opens it again.)
         Settings.completedOnboarding = true
         state.guide = nil
         window = nil

@@ -79,4 +79,11 @@ public enum Settings {
         get { defaults.bool(forKey: "completedOnboarding") }
         set { defaults.set(newValue, forKey: "completedOnboarding") }
     }
+
+    /// The welcome window opened on first launch but hasn't been through yet (e.g. the app was quit
+    /// while it was open). Set to `false` rather than left unset, which tells it apart from someone
+    /// upgrading from a version without onboarding.
+    public static var onboardingInProgress: Bool {
+        defaults.object(forKey: "completedOnboarding") as? Bool == false
+    }
 }
