@@ -87,7 +87,7 @@ private struct MenuContent: View {
         }
         Text(model.statusText)
         if let muted = model.mutedText {
-            Text(muted)
+            Label(muted, systemImage: "mic.slash.fill")
         }
         if let ended = model.endedText {
             Text(ended)

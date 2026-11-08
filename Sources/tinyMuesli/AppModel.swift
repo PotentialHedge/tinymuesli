@@ -852,7 +852,8 @@ final class AppModel {
         switch status {
         case .idle: processing.isEmpty ? "waveform" : "ellipsis.circle"
         case .detected: "mic.circle"
-        case .recording: "record.circle.fill"
+        // Muted, whether by "Mute Me" or the call app: the mic track is recording silence.
+        case .recording: micMuted ? "mic.slash.circle.fill" : "record.circle.fill"
         }
     }
 
