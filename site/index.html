@@ -33,6 +33,7 @@
   .card h2 { font-size: 1rem; margin: 0 0 .3rem; }
   .card p { margin: 0; color: var(--muted); font-size: .95rem; }
   h3 { font-size: 1.1rem; margin: 0 0 .6rem; }
+  pre.install { margin-bottom: .75rem; }
   pre { background: var(--card); border: 1px solid var(--line); border-radius: .8rem; padding: 1rem 1.2rem;
         overflow-x: auto; font: 13.5px/1.55 ui-monospace, "SF Mono", Menlo, monospace; margin: 0 0 3.5rem; }
   footer { border-top: 1px solid var(--line); padding-top: 1.25rem; font-size: .9rem; color: var(--muted); }
@@ -48,7 +49,8 @@
     <a class="button" href="https://github.com/PotentialHedge/tinymuesli/releases/latest">Download for macOS</a>
     <a class="button secondary" href="https://github.com/PotentialHedge/tinymuesli">Source on GitHub</a>
   </div>
-  <p class="note">Free and open source. Needs macOS 26 on an Apple Silicon Mac. Early version, so expect rough edges.</p>
+  <pre class="install">curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/install.sh | sh</pre>
+  <p class="note">Or <code>brew install --cask potentialhedge/tap/tinymuesli</code>. Free and open source. Needs macOS 26 on an Apple Silicon Mac. Early version, so expect rough edges.</p>
 
   <div class="grid">
     <div class="card"><h2>Notices your meetings</h2><p>When Zoom, Teams, Slack, FaceTime or a call in your browser uses the mic, one click starts recording. No calendar access needed.</p></div>

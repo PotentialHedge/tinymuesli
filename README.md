@@ -18,21 +18,36 @@ speaker-diarization models from Hugging Face. After that nothing leaves your Mac
 
 tinyMuesli is an early version, so expect rough edges. It needs macOS 26 or later on an Apple Silicon Mac.
 
+Paste this into Terminal:
+
+```sh
+curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/install.sh | sh
+```
+
+It puts the latest version in your Applications folder and opens it. A welcome window explains how
+it works, asks for microphone, system audio and notification access, and lets you pick apps to record
+without asking. After that tinyMuesli lives in the menu bar, not the Dock; its menu flags any
+permission that's missing. Later versions install through "Check for Updates…" in the tinyMuesli menu.
+
+Or with Homebrew:
+
+```sh
+brew install --cask potentialhedge/tap/tinymuesli
+```
+
+Or by hand:
+
 1. Download the latest `tinyMuesli-<version>.zip` from
    [Releases](https://github.com/PotentialHedge/tinymuesli/releases/latest) and open it.
 2. Drag `tinyMuesli.app` into your Applications folder.
-3. Open it. macOS will refuse, because the app isn't signed by Apple. Click **Done**.
-4. Go to **System Settings → Privacy & Security**, scroll down to the message about tinyMuesli, click
-   **Open Anyway**, and confirm.
-5. A welcome window explains how it works, asks for microphone, system audio and notification access,
-   and lets you pick apps to record without asking. After that tinyMuesli lives in the menu bar, not
-   the Dock; its menu flags any permission that's missing.
 
-You only need to do steps 3 and 4 once. Later versions install through "Check for Updates…" in the
-tinyMuesli menu.
+The app isn't notarized by Apple, so with Homebrew or a download from the browser, macOS refuses to
+open it the first time. Click **Done**, go to **System Settings → Privacy & Security**, scroll down to
+the message about tinyMuesli, click **Open Anyway**, and confirm. (The `curl` install skips this,
+because files `curl` downloads aren't quarantined.)
 
-To uninstall, quit tinyMuesli and delete it from Applications. Your meetings stay in their folder until
-you delete them.
+To uninstall, quit tinyMuesli and delete it from Applications (or `brew uninstall --cask tinymuesli`;
+`--zap` also removes its settings and hooks). Your meetings stay in their folder until you delete them.
 
 ## Build & run
 
