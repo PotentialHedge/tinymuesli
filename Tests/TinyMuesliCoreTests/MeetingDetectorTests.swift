@@ -110,6 +110,56 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         #expect(store.recentMeetings().map(\.lastPathComponent) == ["2026-11-04 1100 Zoom", "Standup"])
     }
 
+    @Test func findsMeetingsMovedIntoFoldersOfAnyDepth() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: root) }
+        let store = MeetingStore(root: root)
+        func meeting(_ path: String, hour: Int) throws -> URL {
+            let folder = root.appendingPathComponent(path, isDirectory: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let start = calendar.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: hour))!
+            try MeetingMetadata(start: start, app: "Zoom", status: .done).frontmatter()
+                .write(to: folder.appendingPathComponent(MeetingFiles.transcript), atomically: true, encoding: .utf8)
+            return folder
+        }
+        _ = try meeting("2026/11/2026-11-04 0900 Zoom", hour: 9)
+        _ = try meeting("Clients/Acme/Q4/Kickoff", hour: 11)
+        _ = try meeting("Standup", hour: 10)
+        // A folder inside a meeting isn't another meeting.
+        try fm.createDirectory(at: root.appendingPathComponent("Standup/notes/old"), withIntermediateDirectories: true)
+        try "x".write(to: root.appendingPathComponent("Standup/notes/old/transcript.md"), atomically: true, encoding: .utf8)
+        // Nor is anything hidden.
+        _ = try meeting(".Trash/Gone", hour: 12)
+
+        let found = store.recentMeetings(limit: .max)
+        #expect(found.map(store.relativePath(of:)) == ["Clients/Acme/Q4/Kickoff", "Standup", "2026/11/2026-11-04 0900 Zoom"])
+        let library = MeetingLibrary(store: store)
+        #expect(library.meetings().map(\.id) == ["Clients/Acme/Q4/Kickoff", "Standup", "2026/11/2026-11-04 0900 Zoom"])
+        #expect(library.folder(id: "Clients/Acme/Q4/Kickoff") != nil)
+        #expect(library.folder(id: "Standup/notes/old") == nil)
+    }
+
+    @Test func movesMeetingsKeepingFoldersOfTheirOwn() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: base) }
+        let old = MeetingStore(root: base.appendingPathComponent("old"))
+        let new = MeetingStore(root: base.appendingPathComponent("new"))
+        let folder = old.root.appendingPathComponent("Clients/Acme/Kickoff")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "hi".write(to: folder.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: old.root.appendingPathComponent("Clients/Other"), withIntermediateDirectories: true)
+
+        let result = old.move(old.allMeetings(), to: new)
+
+        #expect(result.moved == 1 && result.failed.isEmpty)
+        #expect(fm.fileExists(atPath: new.root.appendingPathComponent("Clients/Acme/Kickoff/transcript.md").path))
+        // Emptied folders go, others stay.
+        #expect(!fm.fileExists(atPath: old.root.appendingPathComponent("Clients/Acme").path))
+        #expect(fm.fileExists(atPath: old.root.appendingPathComponent("Clients/Other").path))
+    }
+
     @Test func createsYearMonthFoldersAndAvoidsCollisions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -121,6 +171,9 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
         #expect(first.path.hasSuffix("2026/11/2026-11-04 1030 Zoom"))
         #expect(second.lastPathComponent == "2026-11-04 1030 Zoom (2)")
+        for folder in [first, second] {
+            try FileManager.default.createDirectory(at: folder.appendingPathComponent("audio"), withIntermediateDirectories: true)
+        }
         #expect(store.recentMeetings().map(\.lastPathComponent) == ["2026-11-04 1030 Zoom (2)", "2026-11-04 1030 Zoom"])
     }
 
@@ -136,8 +189,11 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         let a = try old.makeMeetingFolder(start: nov, appName: "Zoom", calendar: calendar)
         try "hi".write(to: a.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
         let b = try old.makeMeetingFolder(start: oct, appName: "Meet", calendar: calendar)
-        _ = try new.makeMeetingFolder(start: nov, appName: "Zoom", calendar: calendar)
-        // Not a year folder: left alone, and not taken for meetings.
+        // Recording, nothing said yet: only audio.
+        try fm.createDirectory(at: b.appendingPathComponent("audio"), withIntermediateDirectories: true)
+        let taken = try new.makeMeetingFolder(start: nov, appName: "Zoom", calendar: calendar)
+        try "taken".write(to: taken.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+        // No transcript or audio: left alone, and not taken for a meeting.
         try fm.createDirectory(at: old.root.appendingPathComponent("Archive/11/x"), withIntermediateDirectories: true)
 
         /// year/month/name: the temp dir is reached through a symlink, so full paths differ.

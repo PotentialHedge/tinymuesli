@@ -1,6 +1,8 @@
 import Foundation
 
-/// The on-disk layout. The filesystem is the API, so this is the contract other tools rely on:
+/// The on-disk layout. The filesystem is the API, so this is the contract other tools rely on.
+/// New meetings go in `year/month/`; after that, meeting folders can be renamed, moved and
+/// grouped into folders of any depth (see `meetingFolders`):
 ///
 ///     <root>/2026/11/2026-11-04 1030 Zoom/
 ///         transcript.md     frontmatter + transcript
@@ -61,31 +63,64 @@ public struct MeetingStore: Sendable {
     }
 
     /// Most recent meeting folders first, by the start date in `transcript.md`, so folders can be
-    /// renamed. Within a month, folders without readable metadata come last, in name order.
+    /// renamed. Folders without readable metadata come last, in name order.
     public func recentMeetings(limit: Int = 10) -> [URL] {
-        var result: [URL] = []
-        for year in Self.subdirectories(root, digits: 4) {
-            for month in Self.subdirectories(year, digits: 2) {
-                let meetings = Self.subdirectories(month).map { ($0, Self.start(of: $0)) }
-                for (meeting, _) in meetings.sorted(by: { a, b in
-                    switch (a.1, b.1) {
-                    case let (x?, y?) where x != y: x > y
-                    case (_?, nil): true
-                    case (nil, _?): false
-                    default: a.0.lastPathComponent > b.0.lastPathComponent
-                    }
-                }) {
-                    result.append(meeting)
-                    if result.count >= limit { return result }
-                }
+        let meetings = meetingFolders().map { ($0, Self.start(of: $0)) }
+        return meetings.sorted { a, b in
+            switch (a.1, b.1) {
+            case let (x?, y?) where x != y: x > y
+            case (_?, nil): true
+            case (nil, _?): false
+            default: a.0.lastPathComponent > b.0.lastPathComponent
             }
         }
-        return result
+        .prefix(max(0, limit)).map(\.0)
     }
 
     /// Every meeting folder, most recent first.
     public func allMeetings() -> [URL] {
         recentMeetings(limit: .max)
+    }
+
+    /// Every meeting folder under the root, at any depth: new meetings go in `year/month/`, but
+    /// they can be renamed, moved and grouped into folders of your own. A meeting folder is one
+    /// with a `transcript.md` or an `audio/` folder; what's inside it isn't searched further.
+    public func meetingFolders() -> [URL] {
+        var result: [URL] = []
+        func walk(_ dir: URL, depth: Int) {
+            guard depth < 8 else { return }
+            for sub in Self.subdirectories(dir) {
+                if Self.isMeeting(sub) {
+                    result.append(sub)
+                } else {
+                    walk(sub, depth: depth + 1)
+                }
+            }
+        }
+        walk(root, depth: 0)
+        return result
+    }
+
+    static func isMeeting(_ folder: URL) -> Bool {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        return fm.fileExists(atPath: folder.appendingPathComponent(MeetingFiles.transcript).path)
+            || (fm.fileExists(atPath: folder.appendingPathComponent(MeetingFiles.audio).path, isDirectory: &isDir) && isDir.boolValue)
+    }
+
+    /// The folder's path below the root, e.g. "2026/11/2026-11-04 1030 Zoom" or "Clients/Acme/Kickoff".
+    /// Its own name if it isn't below the root.
+    public func relativePath(of folder: URL) -> String {
+        let base = Self.components(root)
+        let parts = Self.components(folder)
+        guard parts.count > base.count, Array(parts.prefix(base.count)) == base else { return folder.lastPathComponent }
+        return parts.dropFirst(base.count).joined(separator: "/")
+    }
+
+    /// Path components with symlinks resolved, since the same folder can be reached as
+    /// /var/... and /private/var/...
+    private static func components(_ url: URL) -> [String] {
+        url.standardizedFileURL.resolvingSymlinksInPath().pathComponents
     }
 
     public struct MoveResult: Sendable {
@@ -94,24 +129,24 @@ public struct MeetingStore: Sendable {
         public var failed: [(folder: URL, reason: String)] = []
     }
 
-    /// Moves meeting folders into `destination`, keeping their `year/month/` path. A name that's
-    /// already taken there gets " (2)", " (3)"... Emptied year and month folders are removed.
+    /// Moves meeting folders into `destination`, keeping their path below the root (`year/month/`,
+    /// or folders of your own). A name that's already taken there gets " (2)", " (3)"... Folders
+    /// left empty are removed, up to the root.
     public func move(_ meetings: [URL], to destination: MeetingStore) -> MoveResult {
         let fm = FileManager.default
         var result = MoveResult()
         for folder in meetings {
-            let month = folder.deletingLastPathComponent()
-            let year = month.deletingLastPathComponent()
-            let targetMonth = destination.root
-                .appendingPathComponent(year.lastPathComponent, isDirectory: true)
-                .appendingPathComponent(month.lastPathComponent, isDirectory: true)
+            let relative = relativePath(of: folder).split(separator: "/").map(String.init)
+            let targetParent = relative.dropLast().reduce(destination.root) {
+                $0.appendingPathComponent($1, isDirectory: true)
+            }
             do {
-                try fm.createDirectory(at: targetMonth, withIntermediateDirectories: true)
+                try fm.createDirectory(at: targetParent, withIntermediateDirectories: true)
                 let base = folder.lastPathComponent
-                var target = targetMonth.appendingPathComponent(base, isDirectory: true)
+                var target = targetParent.appendingPathComponent(base, isDirectory: true)
                 var n = 2
                 while fm.fileExists(atPath: target.path) {
-                    target = targetMonth.appendingPathComponent("\(base) (\(n))", isDirectory: true)
+                    target = targetParent.appendingPathComponent("\(base) (\(n))", isDirectory: true)
                     n += 1
                 }
                 try fm.moveItem(at: folder, to: target)
@@ -119,25 +154,26 @@ public struct MeetingStore: Sendable {
             } catch {
                 result.failed.append((folder, error.localizedDescription))
             }
-            for dir in [month, year] where Self.subdirectories(dir).isEmpty && Self.isEmpty(dir) {
+            var dir = folder.deletingLastPathComponent()
+            for _ in relative.dropLast() {
+                guard Self.subdirectories(dir).isEmpty, Self.isEmpty(dir) else { break }
                 try? fm.removeItem(at: dir)
+                dir = dir.deletingLastPathComponent()
             }
         }
         return result
     }
 
-    /// Subfolders, newest name first. `digits` keeps only all-digit names of that length
-    /// (year and month folders), so other things in the root aren't taken for meetings.
-    private static func subdirectories(_ url: URL, digits: Int? = nil) -> [URL] {
+    /// Subfolders that aren't hidden or packages (like an .app), newest name first.
+    private static func subdirectories(_ url: URL) -> [URL] {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]
         let items = (try? FileManager.default.contentsOfDirectory(
-            at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+            at: url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles, .skipsPackageDescendants]
         )) ?? []
         return items
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            .filter { url in
-                guard let digits else { return true }
-                let name = url.lastPathComponent
-                return name.count == digits && name.allSatisfy(\.isASCII) && name.allSatisfy(\.isNumber)
+            .filter {
+                let values = try? $0.resourceValues(forKeys: keys)
+                return values?.isDirectory == true && values?.isPackage != true && values?.isSymbolicLink != true
             }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }

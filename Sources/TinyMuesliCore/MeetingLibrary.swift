@@ -2,7 +2,8 @@ import Foundation
 
 /// A meeting as the CLI and MCP server describe it.
 public struct MeetingSummary: Codable, Sendable, Equatable {
-    /// Path relative to the meetings root, e.g. "2026/11/2026-11-04 1030 Zoom".
+    /// Path relative to the meetings root, e.g. "2026/11/2026-11-04 1030 Zoom" (or wherever the
+    /// folder was moved to). Changes when the folder is renamed or moved.
     public var id: String
     public var path: String
     public var start: Date
@@ -62,7 +63,7 @@ public struct MeetingLibrary: Sendable {
 
     /// Looks a meeting up among those that exist, so an id can never reach outside the root.
     public func folder(id: String) -> URL? {
-        store.recentMeetings(limit: .max).first { Self.id(of: $0) == id }
+        store.meetingFolders().first { self.id(of: $0) == id }
     }
 
     public func summary(of folder: URL) -> MeetingSummary? {
@@ -70,7 +71,7 @@ public struct MeetingLibrary: Sendable {
               let metadata = MeetingMetadata(parsing: text)
         else { return nil }
         return MeetingSummary(
-            id: Self.id(of: folder), path: folder.path, start: metadata.start, end: metadata.end, title: metadata.title, app: metadata.app,
+            id: id(of: folder), path: folder.path, start: metadata.start, end: metadata.end, title: metadata.title, app: metadata.app,
             status: metadata.status.rawValue, language: metadata.language, speakers: metadata.speakers,
             tags: metadata.tags, error: metadata.error,
             suggestedTitle: metadata.title == nil ? MeetingSuggestions.load(folder: folder)?.title : nil
@@ -133,7 +134,7 @@ public struct MeetingLibrary: Sendable {
             let body = MeetingProcessor.body(of: folder.appendingPathComponent(MeetingFiles.transcript))
             for paragraph in body.components(separatedBy: "\n\n") {
                 guard let turn = Self.parseTurn(paragraph), let excerpt = Self.excerpt(of: turn.text, around: query) else { continue }
-                hits.append(SearchHit(meeting: Self.id(of: folder), speaker: turn.speaker, timestamp: turn.timestamp, excerpt: excerpt))
+                hits.append(SearchHit(meeting: id(of: folder), speaker: turn.speaker, timestamp: turn.timestamp, excerpt: excerpt))
                 if hits.count == limit { return hits }
             }
         }
@@ -147,8 +148,10 @@ public struct MeetingLibrary: Sendable {
         return try encoder.encode(value)
     }
 
-    public static func id(of folder: URL) -> String {
-        folder.pathComponents.suffix(3).joined(separator: "/")
+    /// The folder's path below the meetings root, e.g. "2026/11/2026-11-04 1030 Zoom", or
+    /// "Clients/Acme/Kickoff" for one moved into folders of your own.
+    public func id(of folder: URL) -> String {
+        store.relativePath(of: folder)
     }
 
     /// A paragraph as `TranscriptRenderer` writes it: `**Speaker 1** [00:00:04] Text`.

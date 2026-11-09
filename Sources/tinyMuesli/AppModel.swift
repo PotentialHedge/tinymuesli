@@ -775,8 +775,11 @@ final class AppModel {
               Self.samePath(url, store.root) == false else { return }
 
         let old = store
-        // A meeting folder can't go inside itself.
-        let movable = old.allMeetings().filter { !Self.path(url).hasPrefix(Self.path($0) + "/") }
+        // A meeting folder can't go inside itself, and ones already in the new folder (if it's
+        // inside the old one) stay where they are.
+        let movable = old.allMeetings().filter {
+            !Self.path(url).hasPrefix(Self.path($0) + "/") && !Self.path($0).hasPrefix(Self.path(url) + "/")
+        }
         guard !movable.isEmpty else { return setMeetingsFolder(url) }
 
         let alert = NSAlert()

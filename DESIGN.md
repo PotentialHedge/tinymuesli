@@ -59,6 +59,14 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
                                  # (+ mic-2.caf etc. if a continued meeting changed device)
 ```
 
+New meetings go in `year/month/`, but that's only where they start: rename meeting folders, move
+them, and group them into folders of your own at any depth (`Clients/Acme/Kickoff/`). A meeting is
+any folder with a `transcript.md` or an `audio/` folder (one being recorded before anyone spoke);
+folders inside a meeting, hidden folders, packages and symlinks aren't searched, and the walk stops
+8 levels down. Meetings are ordered by the `date:` in their frontmatter, not by folder. A meeting's
+id (CLI, MCP, `tinymuesli://` links) is its path below the meetings folder, so it changes when the
+folder is renamed or moved. Moving to another meetings folder keeps each meeting's path below it.
+
 `transcript.md`, one paragraph per turn (consecutive segments of one speaker are joined unless
 there's a 30 s pause):
 
