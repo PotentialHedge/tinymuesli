@@ -101,7 +101,7 @@ public struct MeetingStore: Sendable {
         return result
     }
 
-    static func isMeeting(_ folder: URL) -> Bool {
+    public static func isMeeting(_ folder: URL) -> Bool {
         let fm = FileManager.default
         var isDir: ObjCBool = false
         return fm.fileExists(atPath: folder.appendingPathComponent(MeetingFiles.transcript).path)

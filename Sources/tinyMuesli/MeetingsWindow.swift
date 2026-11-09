@@ -35,6 +35,8 @@ final class MeetingBrowser {
 
     var selection: URL?
     private(set) var entries: [Entry] = []
+    /// Every folder below the meetings folder that isn't a meeting, empty ones too, for "Group by Folder".
+    private(set) var folders: [String] = []
     /// Typed into the sidebar's search field. The selected meeting highlights it too.
     var query = ""
     /// Search results by folder; nil when not searching.
@@ -59,6 +61,7 @@ final class MeetingBrowser {
             let library = MeetingLibrary(store: store)
             var newCache: [URL: (modified: Date?, text: String?, body: String)] = [:]
             var entries: [Entry] = []
+            let folders = store.groupFolders()
             for summary in library.meetings() {
                 let folder = URL(fileURLWithPath: summary.path)
                 let modified = try? folder.appendingPathComponent(MeetingFiles.transcript)
@@ -78,6 +81,7 @@ final class MeetingBrowser {
             }
             await MainActor.run {
                 self.previews = newCache
+                if self.folders != folders { self.folders = folders }
                 if self.entries != entries {
                     self.entries = entries
                     // A live transcript grew, or a meeting came or went: results may differ.
@@ -136,19 +140,24 @@ final class MeetingBrowser {
         let newest: Date
     }
 
-    /// The folders the meetings are in, from their paths. `entries` are newest first.
-    static func folderTree(_ entries: [Entry]) -> FolderNode {
+    /// The folders the meetings are in, from their paths, plus `folders` (paths of folders that
+    /// may have no meetings). `entries` are newest first.
+    static func folderTree(_ entries: [Entry], folders: [String] = []) -> FolderNode {
         var meetings: [String: [Entry]] = [:]
         var children: [String: Set<String>] = [:]
-        for entry in entries {
+        func add(_ parts: some Sequence<Substring>) -> String {
             var parent = ""
-            for part in entry.path.split(separator: "/").dropLast() {
+            for part in parts {
                 let path = parent.isEmpty ? String(part) : "\(parent)/\(part)"
                 children[parent, default: []].insert(path)
                 parent = path
             }
-            meetings[parent, default: []].append(entry)
+            return parent
         }
+        for entry in entries {
+            meetings[add(entry.path.split(separator: "/").dropLast()), default: []].append(entry)
+        }
+        for folder in folders { _ = add(folder.split(separator: "/")) }
         func node(_ path: String) -> FolderNode {
             let folders = (children[path] ?? []).map(node).sorted { ($0.newest, $1.name) > ($1.newest, $0.name) }
             let own = meetings[path] ?? []
@@ -221,6 +230,23 @@ struct MeetingsWindow: View {
     /// Folders closed in that mode, by path below the meetings folder, one per line.
     @AppStorage("meetingFoldersCollapsed") private var collapsedFolders = ""
     @State private var session = MeetingSession()
+    /// The name sheet for a new or renamed folder, and the name typed in it.
+    @State private var folderPrompt: FolderPrompt?
+    @State private var folderName = ""
+    /// The folder a drag is over ("" for the meetings folder itself), highlighted.
+    @State private var dropTarget: String?
+
+    private enum FolderPrompt: Identifiable {
+        case create(parent: String)
+        case rename(path: String)
+
+        var id: String {
+            switch self {
+            case .create(let parent): "create:\(parent)"
+            case .rename(let path): "rename:\(path)"
+            }
+        }
+    }
 
     private var visible: [MeetingBrowser.Entry] {
         let deleting = Set(model.pendingDeletion.map(MeetingBrowser.path))
@@ -233,13 +259,28 @@ struct MeetingsWindow: View {
         NavigationSplitView {
             List(selection: $browser.selection) {
                 if byFolder {
-                    FolderContents(node: MeetingBrowser.folderTree(visible), root: model.store.root,
-                                   isExpanded: isExpanded, row: meetingRow)
+                    // While searching, only the folders with results.
+                    FolderContents(node: MeetingBrowser.folderTree(visible, folders: browser.matches == nil ? browser.folders : []),
+                                   isExpanded: isExpanded, label: folderLabel, row: meetingRow)
                 } else {
                     ForEach(visible, content: meetingRow)
                 }
             }
+            // Dropped outside any folder: into the meetings folder itself.
+            .dropDestination(for: URL.self) { urls, _ in
+                byFolder && drop(urls, into: "")
+            } isTargeted: { targeted($0, "") }
             .toolbar {
+                if byFolder {
+                    ToolbarItem {
+                        Button {
+                            promptForName(.create(parent: ""))
+                        } label: {
+                            Label("New Folder", systemImage: "folder.badge.plus")
+                        }
+                        .help("Make a folder in the meetings folder")
+                    }
+                }
                 ToolbarItem {
                     Toggle(isOn: $byFolder) {
                         Label("Group by Folder", systemImage: byFolder ? "folder.fill" : "folder")
@@ -263,6 +304,14 @@ struct MeetingsWindow: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
+            .alert(folderPrompt.map(promptTitle) ?? "", isPresented: Binding(get: { folderPrompt != nil }, set: { if !$0 { folderPrompt = nil } }),
+                   presenting: folderPrompt) { prompt in
+                TextField("Name", text: $folderName)
+                Button(promptButton(prompt)) { commit(prompt) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(MeetingStore.folderName(folderName) == nil)
+                Button("Cancel", role: .cancel) {}
+            }
         } detail: {
             // The details inspector shares the chat's column, laid out by SwiftUI: .inspector
             // widened the window each time it opened (see InspectorPanel).
@@ -292,15 +341,146 @@ struct MeetingsWindow: View {
     private static let chatMinWidth: CGFloat = 360
 
     private func meetingRow(_ entry: MeetingBrowser.Entry) -> some View {
-        MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
+        let parent = entry.path.split(separator: "/").dropLast().joined(separator: "/")
+        return MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
             .tag(entry.folder)
             .contextMenu {
+                if byFolder {
+                    Button("New Folder…") { promptForName(.create(parent: parent)) }
+                    Divider()
+                }
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
                 }
                 Divider()
                 Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
             }
+            .modifier(FolderDragging(enabled: byFolder, item: entry.folder, drop: { drop($0, into: parent) },
+                                     targeted: { targeted($0, parent) }))
+    }
+
+    /// A folder in the sidebar: dragged to move it, dropped on to move things into it.
+    private func folderLabel(_ folder: MeetingBrowser.FolderNode) -> some View {
+        let url = model.store.url(ofFolder: folder.path)
+        return Label(folder.name, systemImage: "folder")
+            .padding(.horizontal, 4)
+            .background(dropTarget == folder.path ? Color.accentColor.opacity(0.3) : .clear, in: RoundedRectangle(cornerRadius: 5))
+            .contextMenu {
+                Button("New Folder…") { promptForName(.create(parent: folder.path)) }
+                Button("Rename…") { promptForName(.rename(path: folder.path)) }
+                Divider()
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                Divider()
+                Button("Delete Folder…", role: .destructive) { deleteFolder(folder.path) }
+            }
+            .modifier(FolderDragging(enabled: true, item: url, drop: { drop($0, into: folder.path) },
+                                     targeted: { targeted($0, folder.path) }))
+    }
+
+    // MARK: Folder editing
+
+    private func promptForName(_ prompt: FolderPrompt) {
+        switch prompt {
+        case .create: folderName = "untitled folder"
+        case .rename(let path): folderName = path.split(separator: "/").last.map(String.init) ?? ""
+        }
+        folderPrompt = prompt
+    }
+
+    private func promptTitle(_ prompt: FolderPrompt) -> String {
+        switch prompt {
+        case .create(let parent): parent.isEmpty ? "New Folder" : "New Folder in “\(parent.split(separator: "/").last ?? "")”"
+        case .rename(let path): "Rename “\(path.split(separator: "/").last ?? "")”"
+        }
+    }
+
+    private func promptButton(_ prompt: FolderPrompt) -> String {
+        if case .create = prompt { "Create" } else { "Rename" }
+    }
+
+    private func commit(_ prompt: FolderPrompt) {
+        guard let name = MeetingStore.folderName(folderName) else { return }
+        // After the alert has gone: an error shows an alert of its own.
+        Task { @MainActor in
+            switch prompt {
+            case .create(let parent):
+                guard model.createFolder(named: name, in: parent) != nil else { return }
+                reveal(parent)
+            case .rename(let path):
+                let old = model.store.url(ofFolder: path)
+                guard let renamed = model.renameFolder(path, to: name) else { return }
+                relocate([old: model.store.url(ofFolder: renamed)])
+            }
+            browser.reload(store: model.store)
+        }
+    }
+
+    private func deleteFolder(_ path: String) {
+        let folder = MeetingBrowser.path(model.store.url(ofFolder: path))
+        guard model.confirmDeleteFolder(path) else { return }
+        if let selection = browser.selection, MeetingBrowser.path(selection).hasPrefix(folder + "/") {
+            browser.selection = nil
+        }
+        browser.reload(store: model.store)
+    }
+
+    /// Moves dragged meetings and folders into a folder; only ones in the meetings folder.
+    private func drop(_ urls: [URL], into parent: String) -> Bool {
+        dropTarget = nil
+        // Like Finder, a folder dropped on itself or into one of its own folders just goes back.
+        let items = urls.filter { $0.isFileURL && model.store.isBelowRoot($0) }.filter {
+            let path = model.store.relativePath(of: $0)
+            return parent != path && !parent.hasPrefix(path + "/")
+        }
+        guard !items.isEmpty else { return false }
+        // After the drag has finished: something in use shows an alert.
+        Task { @MainActor in
+            let moved = model.move(items, into: parent)
+            guard !moved.isEmpty else { return }
+            relocate(moved)
+            reveal(parent)
+            browser.reload(store: model.store)
+        }
+        return true
+    }
+
+    private func targeted(_ isTargeted: Bool, _ path: String) {
+        if isTargeted {
+            dropTarget = path
+        } else if dropTarget == path {
+            dropTarget = nil
+        }
+    }
+
+    /// Opens a folder and the ones it's in.
+    private func reveal(_ folderPath: String) {
+        var path = ""
+        for part in folderPath.split(separator: "/") {
+            path = path.isEmpty ? String(part) : "\(path)/\(part)"
+            isExpanded(path).wrappedValue = true
+        }
+    }
+
+    /// After a move or rename, keeps the selected meeting selected and closed folders closed at their new paths.
+    private func relocate(_ moved: [URL: URL]) {
+        for (old, new) in moved {
+            let (oldPath, newPath) = (MeetingBrowser.path(old), MeetingBrowser.path(new))
+            if let selection = browser.selection {
+                let path = MeetingBrowser.path(selection)
+                if path == oldPath {
+                    browser.selection = new
+                } else if path.hasPrefix(oldPath + "/") {
+                    browser.selection = URL(fileURLWithPath: newPath + path.dropFirst(oldPath.count), isDirectory: true)
+                }
+            }
+            let (oldRelative, newRelative) = (model.store.relativePath(of: old), model.store.relativePath(of: new))
+            let collapsed = collapsedFolders.split(separator: "\n").map { line -> String in
+                if line == oldRelative { return newRelative }
+                if line.hasPrefix(oldRelative + "/") { return newRelative + line.dropFirst(oldRelative.count) }
+                return String(line)
+            }
+            collapsedFolders = Set(collapsed).sorted().joined(separator: "\n")
+        }
     }
 
     /// Opens the folders a meeting is in (say, one picked in the menu), so its row shows.
@@ -381,26 +561,39 @@ struct MeetingsWindow: View {
 }
 
 /// A folder's subfolders, each a disclosure group, then its own meetings.
-private struct FolderContents<Row: View>: View {
+private struct FolderContents<FolderLabel: View, Row: View>: View {
     let node: MeetingBrowser.FolderNode
-    let root: URL
     let isExpanded: (String) -> Binding<Bool>
+    let label: (MeetingBrowser.FolderNode) -> FolderLabel
     let row: (MeetingBrowser.Entry) -> Row
 
     var body: some View {
         ForEach(node.folders) { folder in
             DisclosureGroup(isExpanded: isExpanded(folder.path)) {
-                FolderContents(node: folder, root: root, isExpanded: isExpanded, row: row)
+                FolderContents(node: folder, isExpanded: isExpanded, label: label, row: row)
             } label: {
-                Label(folder.name, systemImage: "folder")
-                    .contextMenu {
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent(folder.path, isDirectory: true)])
-                        }
-                    }
+                label(folder)
             }
         }
         ForEach(node.meetings, content: row)
+    }
+}
+
+/// Drags a meeting or folder (as its file URL, so Finder takes it too) and takes drops of them.
+private struct FolderDragging: ViewModifier {
+    let enabled: Bool
+    let item: URL
+    let drop: ([URL]) -> Bool
+    let targeted: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .draggable(item)
+                .dropDestination(for: URL.self) { urls, _ in drop(urls) } isTargeted: { targeted($0) }
+        } else {
+            content
+        }
     }
 }
 

@@ -546,6 +546,111 @@ final class AppModel {
         "\(session.appName ?? "Meeting") from \(session.startedAt.formatted(date: .omitted, time: .shortened))"
     }
 
+    // MARK: - Folders
+
+    /// Something still writes to the meeting's folder (recording, waiting to be continued, the
+    /// final pass, a pending delete), so it mustn't move.
+    func isInUse(_ folder: URL) -> Bool {
+        var busy = processing.map(Self.path) + pendingDeletion.map(Self.path)
+        if case .recording(let session, _) = status { busy.append(Self.path(session.folder)) }
+        if let ended { busy.append(Self.path(ended.session.folder)) }
+        let path = Self.path(folder)
+        return busy.contains { $0 == path || $0.hasPrefix(path + "/") }
+    }
+
+    /// Moves meetings and folders into a folder of the meetings folder ("" for the folder itself).
+    /// Returns where each one went; ones in use or that failed stay, with an alert.
+    func move(_ items: [URL], into parent: String) -> [URL: URL] {
+        var moved: [URL: URL] = [:]
+        var problems: [String] = []
+        for item in items {
+            if isInUse(item) {
+                problems.append(MeetingStore.isMeeting(item)
+                    ? "“\(item.lastPathComponent)” is still being recorded or transcribed. Move it once it's done."
+                    : "“\(item.lastPathComponent)” has a meeting that's still being recorded or transcribed. Move it once that's done.")
+                continue
+            }
+            do {
+                let target = try store.moveItem(item, into: parent)
+                if target != item { moved[item] = target }
+            } catch {
+                problems.append(error.localizedDescription)
+            }
+        }
+        refreshRecentMeetings()
+        if !problems.isEmpty { showFolderError("Couldn't Move", problems.joined(separator: "\n\n")) }
+        return moved
+    }
+
+    /// Returns the new folder's path, or nil (after an alert) if it couldn't be made.
+    func createFolder(named name: String, in parent: String) -> String? {
+        do {
+            return try store.createFolder(named: name, in: parent)
+        } catch {
+            showFolderError("Couldn't Make the Folder", error.localizedDescription)
+            return nil
+        }
+    }
+
+    /// Returns the folder's new path, or nil (after an alert) if it couldn't be renamed.
+    func renameFolder(_ path: String, to name: String) -> String? {
+        let folder = store.url(ofFolder: path)
+        guard !isInUse(folder) else {
+            showFolderError("Couldn't Rename", "“\(folder.lastPathComponent)” has a meeting that's still being recorded or transcribed. Rename it once that's done.")
+            return nil
+        }
+        do {
+            let renamed = try store.renameFolder(path, to: name)
+            refreshRecentMeetings()
+            return renamed
+        } catch {
+            showFolderError("Couldn't Rename", error.localizedDescription)
+            return nil
+        }
+    }
+
+    /// Asks first, saying how many meetings go with it; returns whether it went to the Trash.
+    @discardableResult
+    func confirmDeleteFolder(_ path: String) -> Bool {
+        let folder = store.url(ofFolder: path)
+        guard !isInUse(folder) else {
+            showFolderError("Couldn't Delete", "“\(folder.lastPathComponent)” has a meeting that's still being recorded or transcribed. Delete it once that's done.")
+            return false
+        }
+        let count = store.meetings(inFolder: path).count
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete “\(folder.lastPathComponent)”?"
+        alert.informativeText = switch count {
+        case 0: "The folder is moved to the Trash."
+        case 1: "The folder and the meeting in it, with its transcript and any audio, are moved to the Trash."
+        default: "The folder and the \(count) meetings in it, with their transcripts and any audio, are moved to the Trash."
+        }
+        let delete = alert.addButton(withTitle: count == 0 ? "Delete Folder" : "Delete Folder and Meetings")
+        delete.hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        for meeting in store.meetings(inFolder: path) { notifications.removeMeetingEnded(folder: meeting) }
+        do {
+            try FileManager.default.trashItem(at: folder, resultingItemURL: nil)
+        } catch {
+            showFolderError("Couldn't Delete", error.localizedDescription)
+            return false
+        }
+        refreshRecentMeetings()
+        return true
+    }
+
+    private func showFolderError(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        NSApp.activate()
+        alert.runModal()
+    }
+
     // MARK: - Final pass
 
     /// Transcribes (what wasn't done live) and identifies speakers, then tidies up the folder.
