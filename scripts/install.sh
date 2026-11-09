@@ -3,8 +3,10 @@
 #
 #   curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/install.sh | sh
 #
-# Downloads the latest release from GitHub into /Applications (~/Applications if that isn't
-# writable) and opens it. Later updates come from "Check for Updates…" in the app's menu.
+# Downloads the latest release from GitHub and opens it. An existing copy in /Applications or
+# ~/Applications is updated in place (a running one only after asking, since quitting it cuts off a
+# recording); a new one goes into /Applications, or ~/Applications if that isn't writable.
+# Later updates come from "Check for Updates…" in the app's menu.
 set -eu
 
 REPO="PotentialHedge/tinymuesli"
@@ -18,22 +20,59 @@ fail() { printf 'tinyMuesli: %s\n' "$*" >&2; exit 1; }
 major=$(sw_vers -productVersion | cut -d. -f1)
 [ "$major" -ge 26 ] || fail "tinyMuesli needs macOS 26 or later (this Mac has $(sw_vers -productVersion))."
 
-if pgrep -xq tinyMuesli; then
-  fail "tinyMuesli is running. Update it with \"Check for Updates…\" in its menu, or quit it and run this again."
-fi
-
-if [ -w /Applications ]; then
+# Update an existing copy where it is; otherwise install into /Applications if writable.
+if [ -d "/Applications/$APP_NAME" ]; then
+  DEST=/Applications
+elif [ -d "$HOME/Applications/$APP_NAME" ]; then
+  DEST="$HOME/Applications"
+elif [ -w /Applications ]; then
   DEST=/Applications
 else
   DEST="$HOME/Applications"
   mkdir -p "$DEST"
 fi
+APP="$DEST/$APP_NAME"
 
 # The latest release's appcast names its zip, so this needs no GitHub API call.
 url=$(curl -fsSL "https://github.com/$REPO/releases/latest/download/appcast.xml" |
   sed -n 's/.*<enclosure url="\([^"]*\)".*/\1/p' | head -n 1)
 [ -n "$url" ] || fail "couldn't find the latest release."
 version=$(printf '%s' "$url" | sed -n 's/.*tinyMuesli-\(.*\)\.zip$/\1/p')
+
+# The menu bar app is this binary with no arguments (`tinyMuesli mcp` etc. are CLI runs, which
+# keep working from the old copy until they exit).
+running() { pgrep -fx "$APP/Contents/MacOS/tinyMuesli" > /dev/null; }
+
+installed=""
+if [ -d "$APP" ]; then
+  installed=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)
+  if [ "$installed" = "$version" ]; then
+    say "tinyMuesli $version, the latest version, is already in $DEST."
+    running || open "$APP"
+    exit 0
+  fi
+fi
+
+if running; then
+  say "tinyMuesli ${installed:-} is running. Updating to $version quits it, which cuts off a meeting it's recording."
+  # This script is usually piped into sh, so ask the terminal, not stdin.
+  answer=""
+  if (exec < /dev/tty) 2> /dev/null; then
+    printf 'Quit tinyMuesli and update? [y/N] '
+    read -r answer < /dev/tty || answer=""
+  fi
+  case "$answer" in
+    y | Y | yes | Yes) ;;
+    *) fail "not updated. Quit tinyMuesli and run this again, or use \"Check for Updates…\" in its menu." ;;
+  esac
+  pkill -fx "$APP/Contents/MacOS/tinyMuesli" || true
+  i=0
+  while running; do
+    i=$((i + 1))
+    [ "$i" -le 50 ] || fail "tinyMuesli didn't quit."
+    sleep 0.2
+  done
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -43,9 +82,13 @@ curl -fL --progress-bar "$url" -o "$tmp/tinyMuesli.zip"
 ditto -x -k "$tmp/tinyMuesli.zip" "$tmp"
 [ -d "$tmp/$APP_NAME" ] || fail "the download doesn't contain $APP_NAME."
 
-rm -rf "${DEST:?}/$APP_NAME"
-ditto "$tmp/$APP_NAME" "$DEST/$APP_NAME"
-xattr -dr com.apple.quarantine "$DEST/$APP_NAME" 2>/dev/null || true
+rm -rf "$APP"
+ditto "$tmp/$APP_NAME" "$APP"
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
-say "Installed tinyMuesli $version in $DEST. Opening it…"
-open "$DEST/$APP_NAME"
+if [ -n "$installed" ]; then
+  say "Updated tinyMuesli from $installed to $version in $DEST. Opening it…"
+else
+  say "Installed tinyMuesli $version in $DEST. Opening it…"
+fi
+open "$APP"
