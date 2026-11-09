@@ -12,6 +12,8 @@ final class MeetingBrowser {
     struct Entry: Identifiable, Equatable {
         var id: URL { folder }
         let folder: URL
+        /// Below the meetings folder, e.g. "2026/11/2026-11-04 1030 Zoom" or "Clients/Acme/Kickoff".
+        let path: String
         let name: String
         let start: Date
         let end: Date?
@@ -67,7 +69,7 @@ final class MeetingBrowser {
                     ?? MeetingProcessor.body(of: folder.appendingPathComponent(MeetingFiles.transcript))
                 newCache[folder] = (modified, preview, body)
                 entries.append(Entry(
-                    folder: folder, name: summary.title ?? MeetingStore.displayName(of: folder, start: summary.start),
+                    folder: folder, path: summary.id, name: summary.title ?? MeetingStore.displayName(of: folder, start: summary.start),
                     start: summary.start, end: summary.end,
                     status: MeetingMetadata.Status(rawValue: summary.status) ?? .done,
                     speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags,
@@ -119,6 +121,42 @@ final class MeetingBrowser {
 
     static func path(_ url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// A folder in the sidebar's "Group by Folder" mode.
+    struct FolderNode: Identifiable, Equatable {
+        var id: String { path }
+        /// Below the meetings folder; "" for the meetings folder itself.
+        let path: String
+        let name: String
+        /// Newest first, by their newest meeting.
+        let folders: [FolderNode]
+        /// The meetings directly in this folder, newest first.
+        let meetings: [Entry]
+        let newest: Date
+    }
+
+    /// The folders the meetings are in, from their paths. `entries` are newest first.
+    static func folderTree(_ entries: [Entry]) -> FolderNode {
+        var meetings: [String: [Entry]] = [:]
+        var children: [String: Set<String>] = [:]
+        for entry in entries {
+            var parent = ""
+            for part in entry.path.split(separator: "/").dropLast() {
+                let path = parent.isEmpty ? String(part) : "\(parent)/\(part)"
+                children[parent, default: []].insert(path)
+                parent = path
+            }
+            meetings[parent, default: []].append(entry)
+        }
+        func node(_ path: String) -> FolderNode {
+            let folders = (children[path] ?? []).map(node).sorted { ($0.newest, $1.name) > ($1.newest, $0.name) }
+            let own = meetings[path] ?? []
+            let newest = ([own.first?.start].compactMap { $0 } + folders.map(\.newest)).max() ?? .distantPast
+            let name = path.split(separator: "/").last.map(String.init) ?? ""
+            return FolderNode(path: path, name: name, folders: folders, meetings: own, newest: newest)
+        }
+        return node("")
     }
 }
 
@@ -178,6 +216,10 @@ struct MeetingsWindow: View {
     @State private var showsDetails = UserDefaults.standard.bool(forKey: Self.detailsShownKey)
     private static let detailsShownKey = "meetingDetailsShown"
     @AppStorage("chatSpeakerColors") private var speakerColors = false
+    /// The sidebar shows the meetings in their folders rather than in one list.
+    @AppStorage("meetingsByFolder") private var byFolder = false
+    /// Folders closed in that mode, by path below the meetings folder, one per line.
+    @AppStorage("meetingFoldersCollapsed") private var collapsedFolders = ""
     @State private var session = MeetingSession()
 
     private var visible: [MeetingBrowser.Entry] {
@@ -190,16 +232,19 @@ struct MeetingsWindow: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $browser.selection) {
-                ForEach(visible) { entry in
-                    MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
-                        .tag(entry.folder)
-                        .contextMenu {
-                            Button("Show in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
-                            }
-                            Divider()
-                            Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
-                        }
+                if byFolder {
+                    FolderContents(node: MeetingBrowser.folderTree(visible), root: model.store.root,
+                                   isExpanded: isExpanded, row: meetingRow)
+                } else {
+                    ForEach(visible, content: meetingRow)
+                }
+            }
+            .toolbar {
+                ToolbarItem {
+                    Toggle(isOn: $byFolder) {
+                        Label("Group by Folder", systemImage: byFolder ? "folder.fill" : "folder")
+                    }
+                    .help(byFolder ? "Show all meetings in one list" : "Show meetings in their folders")
                 }
             }
             .searchable(text: $browser.query, placement: .sidebar, prompt: "Search Meetings")
@@ -232,6 +277,8 @@ struct MeetingsWindow: View {
         }
         .frame(minHeight: 420)
         .onChange(of: showsDetails) { _, shown in UserDefaults.standard.set(shown, forKey: Self.detailsShownKey) }
+        .onChange(of: browser.selection) { _, folder in revealInFolders(folder) }
+        .onChange(of: byFolder) { revealInFolders(browser.selection) }
         .onChange(of: model.recentMeetings) { browser.reload(store: model.store) }
         .task {
             // Picks up meetings and live transcripts written while the window is open.
@@ -243,6 +290,39 @@ struct MeetingsWindow: View {
     }
 
     private static let chatMinWidth: CGFloat = 360
+
+    private func meetingRow(_ entry: MeetingBrowser.Entry) -> some View {
+        MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
+            .tag(entry.folder)
+            .contextMenu {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
+                }
+                Divider()
+                Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
+            }
+    }
+
+    /// Opens the folders a meeting is in (say, one picked in the menu), so its row shows.
+    private func revealInFolders(_ folder: URL?) {
+        guard byFolder, let entry = visible.first(where: { $0.folder == folder }) else { return }
+        var path = ""
+        for part in entry.path.split(separator: "/").dropLast() {
+            path = path.isEmpty ? String(part) : "\(path)/\(part)"
+            isExpanded(path).wrappedValue = true
+        }
+    }
+
+    /// Folders start open. While searching they're all open, so every result shows.
+    private func isExpanded(_ path: String) -> Binding<Bool> {
+        Binding {
+            browser.matches != nil || !collapsedFolders.split(separator: "\n").contains(Substring(path))
+        } set: { open in
+            var collapsed = Set(collapsedFolders.split(separator: "\n").map(String.init))
+            if open { collapsed.remove(path) } else { collapsed.insert(path) }
+            collapsedFolders = collapsed.sorted().joined(separator: "\n")
+        }
+    }
 
     private var selectedEntry: MeetingBrowser.Entry? {
         browser.selection.flatMap { folder in visible.first { $0.folder == folder } }
@@ -297,6 +377,30 @@ struct MeetingsWindow: View {
     private func isOngoing(_ entry: MeetingBrowser.Entry) -> Bool {
         guard case .recording(let session, _) = model.status else { return false }
         return MeetingBrowser.path(session.folder) == MeetingBrowser.path(entry.folder)
+    }
+}
+
+/// A folder's subfolders, each a disclosure group, then its own meetings.
+private struct FolderContents<Row: View>: View {
+    let node: MeetingBrowser.FolderNode
+    let root: URL
+    let isExpanded: (String) -> Binding<Bool>
+    let row: (MeetingBrowser.Entry) -> Row
+
+    var body: some View {
+        ForEach(node.folders) { folder in
+            DisclosureGroup(isExpanded: isExpanded(folder.path)) {
+                FolderContents(node: folder, root: root, isExpanded: isExpanded, row: row)
+            } label: {
+                Label(folder.name, systemImage: "folder")
+                    .contextMenu {
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent(folder.path, isDirectory: true)])
+                        }
+                    }
+            }
+        }
+        ForEach(node.meetings, content: row)
     }
 }
 
