@@ -1,0 +1,78 @@
+# Runs the curl | sh installer on a clean Mac and checks that it installs the latest release,
+# links the `tinymuesli` command, and recognises an up-to-date copy on a second run.
+#
+# "repo" tests scripts/install.sh as committed; "published" tests the copy attached to the
+# latest release, which is what users actually run.
+name: Install
+
+on:
+  push:
+    branches: [main]
+    paths: [scripts/install.sh, .github/workflows/install.yml]
+  pull_request:
+    paths: [scripts/install.sh, .github/workflows/install.yml]
+  release:
+    types: [published]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  install:
+    name: ${{ matrix.source }} installer (LC_ALL=${{ matrix.locale }})
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [repo, published]
+        # bash 3.2 (macOS sh) parses variable names differently under a UTF-8 locale.
+        locale: [en_US.UTF-8, C]
+    env:
+      LC_ALL: ${{ matrix.locale }}
+      LANG: ${{ matrix.locale }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get the installer
+        run: |
+          if [ "${{ matrix.source }}" = repo ]; then
+            cp scripts/install.sh "$RUNNER_TEMP/install.sh"
+          else
+            curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/install.sh \
+              -o "$RUNNER_TEMP/install.sh"
+          fi
+
+      - name: Install (as with curl | sh)
+        run: /bin/sh < "$RUNNER_TEMP/install.sh" | tee "$RUNNER_TEMP/first.log"
+
+      - name: Check the installed app
+        run: |
+          set -eu
+          latest=$(curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/appcast.xml |
+            sed -n 's/.*<enclosure url="[^"]*tinyMuesli-\([^"]*\)\.zip".*/\1/p' | head -n 1)
+          app=""
+          for d in /Applications "$HOME/Applications"; do
+            [ -d "$d/tinyMuesli.app" ] && { app="$d/tinyMuesli.app"; break; }
+          done
+          [ -n "$app" ] || { echo "tinyMuesli.app wasn't installed"; exit 1; }
+          installed=$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)
+          echo "installed $installed in $app (latest: $latest)"
+          [ "$installed" = "$latest" ]
+          [ -x "$app/Contents/MacOS/tinyMuesli" ]
+          if xattr "$app" | grep -q com.apple.quarantine; then echo "quarantine not removed"; exit 1; fi
+          link=""
+          for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+            [ -L "$d/tinymuesli" ] && { link="$d/tinymuesli"; break; }
+          done
+          [ -n "$link" ] || { echo "tinymuesli command wasn't linked"; exit 1; }
+          [ "$(readlink "$link")" = "$app/Contents/MacOS/tinyMuesli" ]
+          echo "linked $link"
+
+      - name: Run again (already up to date)
+        run: |
+          /bin/sh < "$RUNNER_TEMP/install.sh" | tee "$RUNNER_TEMP/second.log"
+          grep -q "the latest version, is already in" "$RUNNER_TEMP/second.log"
+
+      - name: Quit tinyMuesli
+        if: always()
+        run: pkill -f tinyMuesli.app/Contents/MacOS/tinyMuesli || true
