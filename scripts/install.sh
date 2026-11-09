@@ -4,7 +4,7 @@
 #   curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download/install.sh | sh
 #
 # Downloads the latest release from GitHub and opens it. An existing copy in /Applications or
-# ~/Applications is updated in place (a running one only after asking, since quitting it cuts off a
+# ~/Applications is updated in place (a running one only after asking, since quitting it stops a
 # recording); a new one goes into /Applications, or ~/Applications if that isn't writable.
 # Later updates come from "Check for Updates…" in the app's menu.
 set -eu
@@ -54,7 +54,7 @@ if [ -d "$APP" ]; then
 fi
 
 if running; then
-  say "tinyMuesli ${installed:-} is running. Updating to $version quits it, which cuts off a meeting it's recording."
+  say "tinyMuesli ${installed:-} is running. Updating to $version quits it, which stops a meeting it's recording (it's transcribed when tinyMuesli opens again)."
   # This script is usually piped into sh, so ask the terminal, not stdin.
   answer=""
   if (exec < /dev/tty) 2> /dev/null; then

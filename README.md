@@ -25,7 +25,7 @@ curl -fsSL https://github.com/PotentialHedge/tinymuesli/releases/latest/download
 ```
 
 It puts the latest version in your Applications folder and opens it. Run it again to update: it
-replaces your copy where it is (asking first if tinyMuesli is running, since quitting it cuts off a
+replaces your copy where it is (asking first if tinyMuesli is running, since quitting it stops a
 recording) and does nothing if you already have the latest version. A welcome window explains how
 it works, asks for microphone, system audio and notification access, and lets you pick apps to record
 without asking. After that tinyMuesli lives in the menu bar, not the Dock; its menu flags any

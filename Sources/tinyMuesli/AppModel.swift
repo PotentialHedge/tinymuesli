@@ -86,9 +86,34 @@ final class AppModel {
     var micMuted: Bool { muteMe || (followCallMute && callMuted) }
 
     /// A meeting is being recorded, paused, processed or moved, so the app shouldn't quit for an update.
-    var isBusy: Bool {
-        if case .recording = status { return true }
-        return ended != nil || !processing.isEmpty || movingMeetings != nil
+    var isBusy: Bool { quitBlocker != nil }
+
+    /// What quitting now would cut off, most important first (nil: nothing, quit away).
+    enum QuitBlocker {
+        /// Recording, or paused and waiting to be continued. Stopping it keeps everything recorded.
+        case recording(paused: Bool)
+        /// Moving meetings to another folder. Quitting part-way leaves them split between the two.
+        case moving
+        /// A final pass. Quitting stops it, and it starts over at the next launch.
+        case processing
+    }
+
+    var quitBlocker: QuitBlocker? {
+        if isRecording { return .recording(paused: false) }
+        if ended != nil { return .recording(paused: true) }
+        if movingMeetings != nil { return .moving }
+        if !processing.isEmpty { return .processing }
+        return nil
+    }
+
+    /// Readies everything for quitting now: stops the recording (and a paused one), so their audio
+    /// is complete and their final pass runs at the next launch, and deletes meetings that were
+    /// waiting for their final pass to finish first.
+    func prepareToQuit() {
+        stopRecording(notify: false)
+        finishEndedMeeting()
+        for folder in pendingDeletion { trash(folder) }
+        pendingDeletion = []
     }
 
     private(set) var store = MeetingStore()

@@ -3,6 +3,7 @@ import TinyMuesliCore
 import SwiftUI
 
 struct TinyMuesliApp: App {
+    @NSApplicationDelegateAdaptor private var quitGuard: QuitGuard
     @State private var model: AppModel
     @State private var updater: Updater
     @State private var permissions: Permissions
@@ -14,6 +15,7 @@ struct TinyMuesliApp: App {
         let permissions = Permissions()
         let onboarding = Onboarding(model: model, permissions: permissions)
         _model = State(initialValue: model)
+        QuitGuard.model = model
         _updater = State(initialValue: Updater { model.isBusy })
         _permissions = State(initialValue: permissions)
         _onboarding = State(initialValue: onboarding)
