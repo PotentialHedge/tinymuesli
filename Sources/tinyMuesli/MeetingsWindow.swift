@@ -282,8 +282,23 @@ struct MeetingsWindow: View {
             .dropDestination(for: URL.self) { urls, _ in
                 byFolder && drop(urls, into: "")
             } isTargeted: { targeted($0, "") }
+            // The two layouts share rows (same tags), and NSOutlineView animating them from one
+            // structure to the other left stale rows drawn over each other: a fresh list per layout.
+            .id(byFolder)
             .toolbar {
+                ToolbarItem {
+                    // Two segments, like tabs: arrow keys move between them.
+                    Picker("Group", selection: $byFolder.animation(nil)) {
+                        Label("By Date", systemImage: "list.bullet").tag(false)
+                            .help("Show all meetings in one list, newest first")
+                        Label("By Folder", systemImage: "folder").tag(true)
+                            .help("Show meetings in their folders")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelStyle(.iconOnly)
+                }
                 if byFolder {
+                    ToolbarSpacer(.fixed)
                     ToolbarItem {
                         Button {
                             promptForName(.create(parent: ""))
@@ -292,12 +307,6 @@ struct MeetingsWindow: View {
                         }
                         .help("Make a folder in the meetings folder")
                     }
-                }
-                ToolbarItem {
-                    Toggle(isOn: $byFolder) {
-                        Label("Group by Folder", systemImage: byFolder ? "folder.fill" : "folder")
-                    }
-                    .help(byFolder ? "Show all meetings in one list" : "Show meetings in their folders")
                 }
             }
             .searchable(text: $browser.query, placement: .sidebar, prompt: "Search Meetings")
