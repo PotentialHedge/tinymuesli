@@ -607,7 +607,7 @@ final class AppModel {
     }
 
     /// Finished meetings that have never had suggestions, newest first.
-    private func suggestForEarlierMeetings() {
+    func suggestForEarlierMeetings() {
         guard suggestWithAppleIntelligence, MeetingSuggester.isAvailable else { return }
         let store = store
         Task {

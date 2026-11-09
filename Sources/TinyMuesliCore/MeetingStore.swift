@@ -165,7 +165,7 @@ public struct MeetingStore: Sendable {
     }
 
     /// Subfolders that aren't hidden or packages (like an .app), newest name first.
-    private static func subdirectories(_ url: URL) -> [URL] {
+    static func subdirectories(_ url: URL) -> [URL] {
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]
         let items = (try? FileManager.default.contentsOfDirectory(
             at: url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles, .skipsPackageDescendants]

@@ -137,12 +137,7 @@ private struct RecordingSettings: View {
                     Text("Off: only the transcript is kept.")
                 }
                 if AppleIntelligence.status != .notEligible {
-                    Toggle(isOn: $model.suggestWithAppleIntelligence) {
-                        Text("Suggest Titles and Names")
-                        Text(AppleIntelligence.status == .ready
-                             ? "Apple Intelligence suggests a title, tags and speaker names for each meeting, on your Mac."
-                             : "Uses Apple Intelligence, which isn't ready on this Mac yet.")
-                    }
+                    IntelligenceSettings(model: model)
                 }
             }
             Section {
@@ -173,6 +168,73 @@ private struct RecordingSettings: View {
     /// Meeting apps on this Mac, and any chosen before that aren't any more.
     private var apps: [MeetingApp] {
         MeetingApps.known.filter { AppIcon.icon(for: $0.name) != nil || model.alwaysRecord.contains($0.id) }
+    }
+}
+
+/// The Suggest Titles and Names toggle, and while Apple Intelligence isn't ready, what's in the way:
+/// turned off, a language mismatch, or the model still downloading. Checked every second while
+/// shown, so turning it on in System Settings, or the download finishing, shows up here.
+private struct IntelligenceSettings: View {
+    let model: AppModel
+    @State private var status = AppleIntelligence.status
+    @State private var mismatch = AppleIntelligence.languageMismatch
+    @State private var copied = false
+
+    var body: some View {
+        @Bindable var model = model
+        Toggle(isOn: $model.suggestWithAppleIntelligence) {
+            Text("Suggest Titles and Names")
+            Text("Apple Intelligence suggests a title, tags and speaker names for each meeting, on your Mac.")
+        }
+        .task {
+            guard status != .ready else { return }
+            while !Task.isCancelled, status != .ready {
+                try? await Task.sleep(for: .seconds(1))
+                status = AppleIntelligence.status
+                mismatch = AppleIntelligence.languageMismatch
+            }
+            // Just became ready: catch up on the meetings recorded while it wasn't.
+            if status == .ready { model.suggestForEarlierMeetings() }
+        }
+        if status != .ready {
+            LabeledContent {
+                if status == .notReady, mismatch == nil {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Open Settings…") { AppleIntelligence.openSettings() }
+                }
+            } label: {
+                Text(title)
+                Text(detail)
+            }
+            LabeledContent("Stuck? Your AI agent can check this Mac's settings and walk you through the fix.") {
+                Button(copied ? "Copied" : "Copy Prompt for Agent") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(AppleIntelligence.fixPrompt(), forType: .string)
+                    copied = true
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var title: String {
+        switch status {
+        case .ready: "Apple Intelligence is ready"
+        case .turnedOff: "Apple Intelligence is turned off"
+        case .notReady where mismatch != nil: "Apple Intelligence is waiting for a setting"
+        case .notReady, .notEligible: "Apple Intelligence is downloading its model"
+        }
+    }
+
+    private var detail: String {
+        switch status {
+        case .ready: ""
+        case .turnedOff: "Turn it on in System Settings › Apple Intelligence & Siri. Suggestions start once its model has downloaded."
+        case .notReady where mismatch != nil:
+            "Your Mac uses \(mismatch?.mac ?? ""), but Siri is set to \(mismatch?.siri ?? ""). macOS only downloads the model when they're the same."
+        case .notReady, .notEligible: "This can take a while. Keep your Mac on power and Wi-Fi; suggestions start once it's done."
+        }
     }
 }
 
