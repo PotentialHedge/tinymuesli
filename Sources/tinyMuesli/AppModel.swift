@@ -642,6 +642,18 @@ final class AppModel {
         return true
     }
 
+    /// Gives a meeting a title; returns whether it could (else an alert says why).
+    func setTitle(_ title: String, of folder: URL) -> Bool {
+        do {
+            try MeetingEditor(folder: folder).setTitle(title)
+        } catch {
+            showFolderError("Couldn't Rename", error.localizedDescription)
+            return false
+        }
+        refreshRecentMeetings()
+        return true
+    }
+
     private func showFolderError(_ title: String, _ message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning

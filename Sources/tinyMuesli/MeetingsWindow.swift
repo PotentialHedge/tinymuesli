@@ -239,11 +239,14 @@ struct MeetingsWindow: View {
     private enum FolderPrompt: Identifiable {
         case create(parent: String)
         case rename(path: String)
+        /// Gives a meeting a title, as its details do.
+        case renameMeeting(MeetingBrowser.Entry)
 
         var id: String {
             switch self {
             case .create(let parent): "create:\(parent)"
             case .rename(let path): "rename:\(path)"
+            case .renameMeeting(let entry): "meeting:\(entry.folder.path)"
             }
         }
     }
@@ -318,7 +321,7 @@ struct MeetingsWindow: View {
                 TextField("Name", text: $folderName)
                 Button(promptButton(prompt)) { commit(prompt) }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(MeetingStore.folderName(folderName) == nil)
+                    .disabled(promptName(prompt) == nil)
                 Button("Cancel", role: .cancel) {}
             }
         } detail: {
@@ -364,6 +367,9 @@ struct MeetingsWindow: View {
             }
             Divider()
         }
+        Button("Rename…") { promptForName(.renameMeeting(entry)) }
+            // Like its details: the recorder and the final pass rewrite the file until it's done.
+            .disabled(entry.status != .done && entry.status != .failed)
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
         }
@@ -395,6 +401,7 @@ struct MeetingsWindow: View {
         switch prompt {
         case .create: folderName = "untitled folder"
         case .rename(let path): folderName = path.split(separator: "/").last.map(String.init) ?? ""
+        case .renameMeeting(let entry): folderName = entry.suggestedTitle ?? entry.name
         }
         folderPrompt = prompt
     }
@@ -403,6 +410,7 @@ struct MeetingsWindow: View {
         switch prompt {
         case .create(let parent): parent.isEmpty ? "New Folder" : "New Folder in “\(parent.split(separator: "/").last ?? "")”"
         case .rename(let path): "Rename “\(path.split(separator: "/").last ?? "")”"
+        case .renameMeeting(let entry): "Rename “\(entry.suggestedTitle ?? entry.name)”"
         }
     }
 
@@ -410,8 +418,17 @@ struct MeetingsWindow: View {
         if case .create = prompt { "Create" } else { "Rename" }
     }
 
+    /// The name typed, cleaned up, or nil if it can't be used.
+    private func promptName(_ prompt: FolderPrompt) -> String? {
+        if case .renameMeeting = prompt {
+            let title = MeetingEditor.clean(folderName)
+            return title.isEmpty ? nil : title
+        }
+        return MeetingStore.folderName(folderName)
+    }
+
     private func commit(_ prompt: FolderPrompt) {
-        guard let name = MeetingStore.folderName(folderName) else { return }
+        guard let name = promptName(prompt) else { return }
         // After the alert has gone: an error shows an alert of its own.
         Task { @MainActor in
             switch prompt {
@@ -422,6 +439,10 @@ struct MeetingsWindow: View {
                 let old = model.store.url(ofFolder: path)
                 guard let renamed = model.renameFolder(path, to: name) else { return }
                 relocate([old: model.store.url(ofFolder: renamed)])
+            case .renameMeeting(let entry):
+                guard model.setTitle(name, of: entry.folder) else { return }
+                // The open meeting's details show the new title at once.
+                if session.folder == entry.folder { session.editCount += 1 }
             }
             browser.reload(store: model.store)
         }
