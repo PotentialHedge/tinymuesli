@@ -32,26 +32,27 @@ public enum ChatHandoff {
         /// The services that have tinyMuesli's MCP server.
         public static var withMCPServer: [Service] { allCases.filter(\.hasMCPServer) }
 
-        /// The app, which has tinyMuesli's MCP server, if it's installed; else the web. The ChatGPT
-        /// app's `codex://` scheme is undocumented: it's the URL the app itself builds from a
+        /// The desktop app's link for a new chat. There's no web fallback: chatgpt.com and claude.ai
+        /// can't reach tinyMuesli's local MCP server, so a chat there couldn't read the meeting. The
+        /// ChatGPT app's `codex://` scheme is undocumented: it's the URL the app itself builds from a
         /// `chatgpt.com/?q=` link. Work mode is where it uses local tools from `~/.codex/config.toml`.
-        func base(appInstalled: Bool) -> String {
+        var base: String {
             switch self {
-            case .claude: appInstalled ? "claude://claude.ai/new" : "https://claude.ai/new"
-            case .chatGPT: appInstalled ? "codex://threads/new" : "https://chatgpt.com/"
+            case .claude: "claude://claude.ai/new"
+            case .chatGPT: "codex://threads/new"
             }
         }
 
         /// The query that carries the prompt, and any other the app needs.
-        func query(prompt: String, appInstalled: Bool) -> [URLQueryItem] {
+        func query(prompt: String) -> [URLQueryItem] {
             switch self {
-            case .chatGPT where appInstalled: [URLQueryItem(name: "prompt", value: prompt), URLQueryItem(name: "mode", value: "work")]
-            default: [URLQueryItem(name: "q", value: prompt)]
+            case .claude: [URLQueryItem(name: "q", value: prompt)]
+            case .chatGPT: [URLQueryItem(name: "prompt", value: prompt), URLQueryItem(name: "mode", value: "work")]
             }
         }
 
         /// A URL whose app, if one handles it, means the app is installed and takes chat links.
-        public var appProbe: URL { URL(string: base(appInstalled: true))! }
+        public var appProbe: URL { URL(string: base)! }
     }
 
     /// Names the meeting the way you would (title, else app, and when it was) rather than by id,
@@ -63,9 +64,9 @@ public enum ChatHandoff {
         return "Let's talk about \(name) from \(start.formatted(style)). You can read it with tinyMuesli."
     }
 
-    public static func url(for service: Service, prompt: String, appInstalled: Bool) -> URL? {
-        guard var components = URLComponents(string: service.base(appInstalled: appInstalled)) else { return nil }
-        components.queryItems = service.query(prompt: prompt, appInstalled: appInstalled)
+    public static func url(for service: Service, prompt: String) -> URL? {
+        guard var components = URLComponents(string: service.base) else { return nil }
+        components.queryItems = service.query(prompt: prompt)
         // URLQueryItem leaves "+" alone, which servers read as a space.
         let query = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         components.percentEncodedQuery = query

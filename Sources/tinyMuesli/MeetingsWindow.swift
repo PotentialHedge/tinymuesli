@@ -456,7 +456,7 @@ private struct ChatView: View {
     @State private var bubbleFrames = BubbleFrames()
     /// Assistants with tinyMuesli's MCP server, for the chat button. Read from their config files
     /// when the window appears and whenever the app comes to the front, not on every redraw.
-    @State private var chatServices = ChatHandoff.Service.withMCPServer
+    @State private var chatServices = Self.availableChatServices()
     private static let chatSpace = "chat"
     /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
     @AppStorage("chatSpeakerColors") private var speakerColors = false
@@ -622,7 +622,7 @@ private struct ChatView: View {
         }
         .onChange(of: session.editCount) { reloadIfChanged(force: true) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            let now = ChatHandoff.Service.withMCPServer
+            let now = Self.availableChatServices()
             if now != chatServices { chatServices = now }
         }
         .task(id: folder) {
@@ -716,13 +716,18 @@ private struct ChatView: View {
         return icon
     }
 
+    /// The assistants to offer: tinyMuesli's MCP server is in their config, and their desktop app
+    /// takes chat links. Asks for the app that opens the service's own scheme, not just its bundle
+    /// id: the older ChatGPT app (com.openai.chat) doesn't take codex:// links. Never the web, which
+    /// can't read meetings.
+    static func availableChatServices() -> [ChatHandoff.Service] {
+        ChatHandoff.Service.withMCPServer.filter { NSWorkspace.shared.urlForApplication(toOpen: $0.appProbe) != nil }
+    }
+
     private func openChat(in service: ChatHandoff.Service) {
-        // Asks for the app that opens the service's own scheme, not just its bundle id: the older
-        // ChatGPT app (com.openai.chat) doesn't take codex:// links.
-        let appInstalled = NSWorkspace.shared.urlForApplication(toOpen: service.appProbe) != nil
         guard let metadata = transcript.metadata,
-              let url = ChatHandoff.url(for: service, prompt: ChatHandoff.prompt(title: metadata.title, app: metadata.app, start: metadata.start),
-                                        appInstalled: appInstalled) else { return }
+              let url = ChatHandoff.url(for: service, prompt: ChatHandoff.prompt(title: metadata.title, app: metadata.app, start: metadata.start))
+        else { return }
         NSWorkspace.shared.open(url)
     }
 

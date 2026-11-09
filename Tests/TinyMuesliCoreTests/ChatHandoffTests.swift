@@ -14,22 +14,16 @@ import Testing
         #expect(ChatHandoff.prompt(title: nil, app: "Zoom", start: start, timeZone: utc).hasPrefix("Let's talk about my Zoom meeting from "))
     }
 
-    @Test func putsThePromptInTheURL() throws {
-        let url = try #require(ChatHandoff.url(for: .chatGPT, prompt: "Q4 + roadmap", appInstalled: false))
-        #expect(url.absoluteString == "https://chatgpt.com/?q=Q4%20%2B%20roadmap")
-    }
-
-    @Test func opensTheChatGPTAppWhenInstalled() throws {
-        let app = try #require(ChatHandoff.url(for: .chatGPT, prompt: "Q4 + roadmap", appInstalled: true))
+    @Test func opensTheChatGPTApp() throws {
+        let app = try #require(ChatHandoff.url(for: .chatGPT, prompt: "Q4 + roadmap"))
         #expect(app.absoluteString == "codex://threads/new?prompt=Q4%20%2B%20roadmap&mode=work")
         #expect(ChatHandoff.Service.chatGPT.appProbe.scheme == "codex")
         #expect(ChatHandoff.Service.claude.appProbe.scheme == "claude")
     }
 
-    @Test func opensTheClaudeAppWhenInstalled() throws {
-        let app = try #require(ChatHandoff.url(for: .claude, prompt: "hi", appInstalled: true))
+    /// Never claude.ai or chatgpt.com: the web can't reach the local MCP server.
+    @Test func opensTheClaudeApp() throws {
+        let app = try #require(ChatHandoff.url(for: .claude, prompt: "hi"))
         #expect(app.absoluteString == "claude://claude.ai/new?q=hi")
-        let web = try #require(ChatHandoff.url(for: .claude, prompt: "hi", appInstalled: false))
-        #expect(web.absoluteString == "https://claude.ai/new?q=hi")
     }
 }
