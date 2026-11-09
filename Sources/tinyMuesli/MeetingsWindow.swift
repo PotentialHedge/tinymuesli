@@ -266,6 +266,15 @@ struct MeetingsWindow: View {
                     ForEach(visible, content: meetingRow)
                 }
             }
+            // A meeting's menu; on empty space, a new folder in the meetings folder. (Folders have
+            // their own, since they aren't rows that can be selected.)
+            .contextMenu(forSelectionType: URL.self) { folders in
+                if let folder = folders.first, let entry = visible.first(where: { $0.folder == folder }) {
+                    meetingMenu(entry)
+                } else if folders.isEmpty, byFolder {
+                    Button("New Folder…") { promptForName(.create(parent: "")) }
+                }
+            }
             // Dropped outside any folder: into the meetings folder itself.
             .dropDestination(for: URL.self) { urls, _ in
                 byFolder && drop(urls, into: "")
@@ -344,19 +353,22 @@ struct MeetingsWindow: View {
         let parent = entry.path.split(separator: "/").dropLast().joined(separator: "/")
         return MeetingRow(entry: entry, isOngoing: isOngoing(entry), match: browser.matches?[entry.folder], query: browser.query)
             .tag(entry.folder)
-            .contextMenu {
-                if byFolder {
-                    Button("New Folder…") { promptForName(.create(parent: parent)) }
-                    Divider()
-                }
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
-                }
-                Divider()
-                Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
-            }
             .modifier(FolderDragging(enabled: byFolder, item: entry.folder, drop: { drop($0, into: parent) },
                                      targeted: { targeted($0, parent) }))
+    }
+
+    @ViewBuilder private func meetingMenu(_ entry: MeetingBrowser.Entry) -> some View {
+        if byFolder {
+            Button("New Folder…") {
+                promptForName(.create(parent: entry.path.split(separator: "/").dropLast().joined(separator: "/")))
+            }
+            Divider()
+        }
+        Button("Show in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
+        }
+        Divider()
+        Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
     }
 
     /// A folder in the sidebar: dragged to move it, dropped on to move things into it.
