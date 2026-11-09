@@ -58,10 +58,20 @@ public enum ChatHandoff {
     /// Names the meeting the way you would (title, else app, and when it was) rather than by id,
     /// so the prompt reads like something you typed. The assistant finds it with list_meetings.
     public static func prompt(title: String?, app: String?, start: Date, timeZone: TimeZone = .current) -> String {
+        opening(title: title, app: app, start: start, timeZone: timeZone) + " You can read it with tinyMuesli."
+    }
+
+    /// For pasting by hand when the chat link didn't open the app: the same opening, saying where
+    /// the meeting is, for an agent that may not know tinyMuesli.
+    public static func pastePrompt(title: String?, app: String?, start: Date, timeZone: TimeZone = .current) -> String {
+        opening(title: title, app: app, start: start, timeZone: timeZone) + " tinyMuesli recorded and transcribed it on this Mac."
+    }
+
+    private static func opening(title: String?, app: String?, start: Date, timeZone: TimeZone) -> String {
         var style = Date.FormatStyle(date: .abbreviated, time: .shortened)
         style.timeZone = timeZone
         let name = title.map { "my meeting \"\($0)\"" } ?? app.map { "my \($0) meeting" } ?? "my meeting"
-        return "Let's talk about \(name) from \(start.formatted(style)). You can read it with tinyMuesli."
+        return "Let's talk about \(name) from \(start.formatted(style))."
     }
 
     public static func url(for service: Service, prompt: String) -> URL? {

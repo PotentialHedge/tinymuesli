@@ -26,4 +26,10 @@ import Testing
         let app = try #require(ChatHandoff.url(for: .claude, prompt: "hi"))
         #expect(app.absoluteString == "claude://claude.ai/new?q=hi")
     }
+
+    @Test func pastePromptSaysWhereTheMeetingIs() {
+        let text = ChatHandoff.pastePrompt(title: nil, app: "Zoom", start: start, timeZone: utc)
+        #expect(text.hasPrefix("Let's talk about my Zoom meeting from "))
+        #expect(text.hasSuffix(". tinyMuesli recorded and transcribed it on this Mac."))
+    }
 }

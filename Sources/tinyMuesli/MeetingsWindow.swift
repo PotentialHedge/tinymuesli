@@ -457,6 +457,10 @@ private struct ChatView: View {
     /// Assistants with tinyMuesli's MCP server, for the chat button. Read from their config files
     /// when the window appears and whenever the app comes to the front, not on every redraw.
     @State private var chatServices = Self.availableChatServices()
+    /// The last chat button clicked, until the user comes back or the hint is shown.
+    @State private var handoff: Handoff?
+    /// The hint with a prompt to paste, for when the chat link didn't open the app.
+    @State private var handoffHint: Handoff?
     private static let chatSpace = "chat"
     /// One colour per speaker instead of grey bubbles. Off by default; Me is always blue.
     @AppStorage("chatSpeakerColors") private var speakerColors = false
@@ -621,7 +625,26 @@ private struct ChatView: View {
             Text(renameError ?? "")
         }
         .onChange(of: session.editCount) { reloadIfChanged(force: true) }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            handoff?.leftApp = true
+        }
+        .alert("Didn't open in \(handoffHint?.service.name ?? "")?", isPresented: Binding(get: { handoffHint != nil }, set: { if !$0 { handoffHint = nil } }),
+               presenting: handoffHint) { hint in
+            Button("Copy Prompt") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(hint.prompt, forType: .string)
+            }
+            Button("Close", role: .cancel) {}
+        } message: { hint in
+            Text("Paste this into \(hint.service.name), or any agent with tinyMuesli:\n\n\(hint.prompt)")
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Back a few seconds after a chat button: maybe the app didn't open, or not in a chat.
+            if let handoff, handoff.leftApp {
+                let away = Date.now.timeIntervalSince(handoff.opened)
+                if away >= Handoff.hintAfter, away <= Handoff.hintWithin { handoffHint = handoff }
+                self.handoff = nil
+            }
             let now = Self.availableChatServices()
             if now != chatServices { chatServices = now }
         }
@@ -728,7 +751,17 @@ private struct ChatView: View {
         guard let metadata = transcript.metadata,
               let url = ChatHandoff.url(for: service, prompt: ChatHandoff.prompt(title: metadata.title, app: metadata.app, start: metadata.start))
         else { return }
+        let opened = Handoff(service: service, prompt: ChatHandoff.pastePrompt(title: metadata.title, app: metadata.app, start: metadata.start))
+        handoff = opened
         NSWorkspace.shared.open(url)
+        // If the link opened nothing, tinyMuesli never loses focus, so there's no coming back to wait for.
+        Task {
+            try? await Task.sleep(for: .seconds(Handoff.hintAfter + 1))
+            if handoff?.id == opened.id, handoff?.leftApp == false, NSApp.isActive {
+                handoffHint = opened
+                handoff = nil
+            }
+        }
     }
 
     private func reloadIfChanged(force: Bool = false) {
@@ -752,6 +785,19 @@ private struct ChatView: View {
             }
         }
     }
+}
+
+/// A chat button click, for the hint shown when the user comes back soon after.
+private struct Handoff: Identifiable {
+    /// Coming back sooner is too quick to have looked; later, the chat probably worked.
+    static let hintAfter: TimeInterval = 3
+    static let hintWithin: TimeInterval = 90
+
+    let id = UUID()
+    let service: ChatHandoff.Service
+    let prompt: String
+    let opened = Date.now
+    var leftApp = false
 }
 
 private struct Bubble: View {
