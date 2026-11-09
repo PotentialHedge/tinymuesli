@@ -103,7 +103,10 @@ if running; then
 fi
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# macOS sh (bash 3.2) runs an EXIT trap with $? reset to 0 after an error such as an unbound
+# variable, so the script would exit 0; $finished is set only at the end, so any earlier exit is 1.
+finished=""
+trap 'rm -rf "$tmp"; [ -n "$finished" ] || exit 1' EXIT
 
 say "Downloading tinyMuesli ${version}…"
 curl -fL --progress-bar "$url" -o "$tmp/tinyMuesli.zip"
@@ -121,3 +124,4 @@ else
   say "Installed tinyMuesli $version in $DEST. Opening it…"
 fi
 open "$APP"
+finished=1
