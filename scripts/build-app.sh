@@ -4,13 +4,17 @@
 #   CONFIG=debug scripts/build-app.sh
 #   TINYMUESLI_SIGN_IDENTITY="Developer ID Application: …" scripts/build-app.sh
 #
-# Default signing is ad-hoc ("-"). macOS ties privacy permissions to the signature, and an
-# ad-hoc signature changes on every build, so you'll be re-prompted for mic / system audio
-# access after each rebuild. Signing with a stable identity (even a self-signed one) avoids that.
+# macOS ties privacy permissions to the signature, and an ad-hoc one changes on every build: the
+# Accessibility toggle in System Settings stays on but no longer applies, and mic / system audio
+# ask again. So it signs with the "Muesli Self-Signed" certificate (the one releases use) when it's
+# in the keychain, and ad-hoc ("-") only when it isn't.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${CONFIG:-release}"
+if [ -z "${TINYMUESLI_SIGN_IDENTITY:-}" ] && security find-identity -p codesigning | grep -q '"Muesli Self-Signed"'; then
+  TINYMUESLI_SIGN_IDENTITY="Muesli Self-Signed"
+fi
 SIGN_IDENTITY="${TINYMUESLI_SIGN_IDENTITY:--}"
 APP="build/tinyMuesli.app"
 
