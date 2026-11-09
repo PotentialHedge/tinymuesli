@@ -105,7 +105,7 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-say "Downloading tinyMuesli $version…"
+say "Downloading tinyMuesli ${version}…"
 curl -fL --progress-bar "$url" -o "$tmp/tinyMuesli.zip"
 ditto -x -k "$tmp/tinyMuesli.zip" "$tmp"
 [ -d "$tmp/$APP_NAME" ] || fail "the download doesn't contain $APP_NAME."
