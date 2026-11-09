@@ -1,7 +1,8 @@
 import Foundation
 import TinyMuesliCore
 
-/// The same binary doubles as a CLI: `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
+/// The same binary doubles as a CLI: `tinymuesli <command>` once installed (the cask and install.sh link
+/// it onto the PATH), else `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
     static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "mcp", "help", "--help", "-h"]
@@ -20,9 +21,12 @@ enum CLI {
         case "update": return update(Array(args.dropFirst()))
         case "suggest": return suggest(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
-        default:
+        case "help", "--help", "-h":
             print(usage)
-            return args.first.map { ["help", "--help", "-h"].contains($0) } == true ? 0 : 1
+            return 0
+        default:
+            _ = fail("tinymuesli: unknown command \"\(args.first ?? "")\"\n\n" + usage)
+            return 2
         }
     }
 

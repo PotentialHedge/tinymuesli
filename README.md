@@ -63,19 +63,21 @@ open build/tinyMuesli.app         # menu bar app
 swift test                    # unit tests
 ```
 
-The binary is also a CLI:
+The binary is also a CLI. The `curl` install and the Homebrew cask link it onto your PATH as
+`tinymuesli` (for a build of your own, use `build/tinyMuesli.app/Contents/MacOS/tinyMuesli`), and
+`tinymuesli help` lists the commands:
 
 ```sh
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli mic-users              # who's using the mic, and which meeting app it maps to
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli mute-state             # whether each meeting app shows you as muted
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli record --seconds 10    # test recording, then transcribe
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli transcribe "<meeting folder>" [--language de-DE] [--no-diarize] [--delete-audio]
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli languages              # transcription languages on this Mac
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli list                   # meetings, most recent first
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli show "<meeting id>"    # print a transcript
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli search "budget"        # find text in all transcripts
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli speakers "<meeting id>"  # its speakers, and who each sounds like
-build/tinyMuesli.app/Contents/MacOS/tinyMuesli update "<meeting id>" --title "Q4 roadmap" --tags roadmap,acme --speaker "Speaker 1=Ann Lee"
+tinymuesli mic-users              # who's using the mic, and which meeting app it maps to
+tinymuesli mute-state             # whether each meeting app shows you as muted
+tinymuesli record --seconds 10    # test recording, then transcribe
+tinymuesli transcribe "<meeting folder>" [--language de-DE] [--no-diarize] [--delete-audio]
+tinymuesli languages              # transcription languages on this Mac
+tinymuesli list                   # meetings, most recent first
+tinymuesli show "<meeting id>"    # print a transcript
+tinymuesli search "budget"        # find text in all transcripts
+tinymuesli speakers "<meeting id>"  # its speakers, and who each sounds like
+tinymuesli update "<meeting id>" --title "Q4 roadmap" --tags roadmap,acme --speaker "Speaker 1=Ann Lee"
 ```
 
 `list`, `show`, `search`, `speakers` and `update` also take `--json`. `update` changes only what you

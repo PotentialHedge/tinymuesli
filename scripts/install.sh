@@ -7,6 +7,9 @@
 # ~/Applications is updated in place (a running one only after asking, since quitting it stops a
 # recording); a new one goes into /Applications, or ~/Applications if that isn't writable.
 # Later updates come from "Check for Updates…" in the app's menu.
+#
+# It also links the app's binary as `tinymuesli` into a directory on the PATH, so the CLI
+# (`tinymuesli list`, `tinymuesli search …`) works from any terminal.
 set -eu
 
 REPO="PotentialHedge/tinymuesli"
@@ -43,11 +46,36 @@ version=$(printf '%s' "$url" | sed -n 's/.*tinyMuesli-\(.*\)\.zip$/\1/p')
 # keep working from the old copy until they exit).
 running() { pgrep -fx "$APP/Contents/MacOS/tinyMuesli" > /dev/null; }
 
+# Links `tinymuesli` to this copy: into the first writable directory of /opt/homebrew/bin and
+# /usr/local/bin that's on the PATH, else ~/.local/bin. Never replaces a file that isn't a link.
+link_cli() {
+  target="$APP/Contents/MacOS/tinyMuesli"
+  [ "$(readlink "$(command -v tinymuesli 2>/dev/null || true)" 2>/dev/null || true)" = "$target" ] && return 0
+  dir=""
+  for d in /opt/homebrew/bin /usr/local/bin; do
+    case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && { dir=$d; break; } ;; esac
+  done
+  if [ -z "$dir" ]; then
+    dir="$HOME/.local/bin"
+    mkdir -p "$dir"
+  fi
+  if [ -e "$dir/tinymuesli" ] && [ ! -L "$dir/tinymuesli" ]; then
+    say "Not linking the tinymuesli command: $dir/tinymuesli already exists."
+    return 0
+  fi
+  ln -sf "$target" "$dir/tinymuesli"
+  case ":$PATH:" in
+    *":$dir:"*) say "Linked the tinymuesli command into $dir (try: tinymuesli help)." ;;
+    *) say "Linked the tinymuesli command into $dir. Add it to your PATH to use it: export PATH=\"$dir:\$PATH\"" ;;
+  esac
+}
+
 installed=""
 if [ -d "$APP" ]; then
   installed=$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)
   if [ "$installed" = "$version" ]; then
     say "tinyMuesli $version, the latest version, is already in $DEST."
+    link_cli
     running || open "$APP"
     exit 0
   fi
@@ -85,6 +113,7 @@ ditto -x -k "$tmp/tinyMuesli.zip" "$tmp"
 rm -rf "$APP"
 ditto "$tmp/$APP_NAME" "$APP"
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+link_cli
 
 if [ -n "$installed" ]; then
   say "Updated tinyMuesli from $installed to $version in $DEST. Opening it…"

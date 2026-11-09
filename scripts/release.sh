@@ -67,6 +67,7 @@ cask "tinymuesli" do
   depends_on macos: :tahoe
 
   app "tinyMuesli.app"
+  binary "#{appdir}/tinyMuesli.app/Contents/MacOS/tinyMuesli", target: "tinymuesli"
 
   zap trash: [
     "~/.config/tinymuesli",
