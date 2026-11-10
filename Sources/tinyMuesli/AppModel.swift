@@ -144,6 +144,7 @@ final class AppModel {
         if skipSilence { loadSpeechDetector() }
         refreshRecentMeetings()
         startPolling()
+        startAudioCleanup()
         Task {
             languages = await AppleSpeechTranscriber.offeredLocales()
             resumeUnfinishedMeetings()
@@ -155,6 +156,27 @@ final class AppModel {
 
     /// Polling every 2s is cheap (a handful of property reads) and simpler than
     /// juggling Core Audio listeners on every process object.
+    /// Deletes audio whose 24 h are up (see `AudioRetention`), at launch and then hourly. Not while
+    /// audio is kept: turning that on keeps what's still there.
+    private func startAudioCleanup() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.deleteExpiredAudio()
+                try? await Task.sleep(for: .seconds(60 * 60))
+            }
+        }
+    }
+
+    private func deleteExpiredAudio() async {
+        guard !keepAudio else { return }
+        let store = store
+        let expired = await Task.detached(priority: .utility) { AudioRetention.expired(in: store) }.value
+        for audio in expired where !keepAudio && !isInUse(audio.deletingLastPathComponent()) {
+            log.notice("Deleting audio of \(audio.deletingLastPathComponent().lastPathComponent, privacy: .public) after 24 h")
+            try? FileManager.default.removeItem(at: audio)
+        }
+    }
+
     private func startPolling() {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -710,7 +732,8 @@ final class AppModel {
             defer { runHook(folder: folder, status: outcome) }
             do {
                 let transcriber = try await AppleSpeechTranscriber.make(preferred: language.map(Locale.init(identifier:)))
-                let processor = MeetingProcessor(transcriber: transcriber, diarizer: diarizer, keepAudio: keepAudio)
+                let processor = MeetingProcessor(transcriber: transcriber, diarizer: diarizer, keepAudio: keepAudio,
+                                                 deleteAudioAfter: AudioRetention.grace)
                 let result = try await processor.process(folder: folder, live: phrases)
                 if let warning = result.warnings.first { lastError = warning }
                 outcome = .done

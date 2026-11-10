@@ -6,7 +6,7 @@ import Foundation
 ///
 ///     <root>/2026/11/2026-11-04 1030 Zoom/
 ///         transcript.md     frontmatter + transcript
-///         audio/mic.caf     raw tracks (temporary unless audio retention is on)
+///         audio/mic.caf     raw tracks (deleted 24 h after transcribing unless audio is kept)
 ///         audio/system.caf
 public struct MeetingStore: Sendable {
     public let root: URL

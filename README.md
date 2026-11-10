@@ -9,7 +9,7 @@ configs and hook scripts need the new names (`tinymuesli`, `TINYMUESLI_*`).
 Status: menu bar app, meeting detection, dual-track recording (mic = you, system audio = everyone
 else), live on-device transcription, and speaker identification at the end of each meeting.
 Each meeting becomes a folder with `transcript.md` and `transcript.json`; audio is deleted
-afterwards unless you turn on "Keep Audio After Transcribing". New meetings land in `year/month/`,
+24 hours afterwards unless you turn on "Keep Audio After Transcribing". New meetings land in `year/month/`,
 but you can rename the folders and sort them into folders of your own however you like.
 
 On first use, macOS downloads the speech model for your language, and tinyMuesli downloads ~34 MB of

@@ -18,18 +18,21 @@ public enum MeetingFiles {
 
 /// The final pass over a recorded meeting: transcribe whatever wasn't transcribed live,
 /// diarize the system track, merge both tracks, write `transcript.md` + `transcript.json`,
-/// and delete the audio unless it should be kept.
+/// and delete the audio unless it should be kept (at once, or after a while: see `AudioRetention`).
 ///
 /// It only needs the folder, so it doubles as crash recovery and as `tinymuesli transcribe`.
 public struct MeetingProcessor: Sendable {
     public var transcriber: Transcriber
     public var diarizer: Diarizer?
     public var keepAudio: Bool
+    /// Without `keepAudio`: how long the audio stays before `AudioRetention` deletes it (0: now).
+    public var deleteAudioAfter: TimeInterval
 
-    public init(transcriber: Transcriber, diarizer: Diarizer?, keepAudio: Bool) {
+    public init(transcriber: Transcriber, diarizer: Diarizer?, keepAudio: Bool, deleteAudioAfter: TimeInterval = 0) {
         self.transcriber = transcriber
         self.diarizer = diarizer
         self.keepAudio = keepAudio
+        self.deleteAudioAfter = deleteAudioAfter
     }
 
     public struct Result: Sendable {
@@ -136,8 +139,13 @@ public struct MeetingProcessor: Sendable {
             metadata.speakers = document.speakers
             try write(metadata: metadata, body: TranscriptRenderer.markdown(segments), to: mdURL)
 
-            if !keepAudio {
-                try? fm.removeItem(at: folder.appendingPathComponent(MeetingFiles.audio))
+            let audio = folder.appendingPathComponent(MeetingFiles.audio)
+            if keepAudio {
+                AudioRetention.keep(audio)
+            } else if deleteAudioAfter > 0 {
+                AudioRetention.expire(audio, at: .now + deleteAudioAfter)
+            } else {
+                try? fm.removeItem(at: audio)
             }
             return Result(document: document, warnings: warnings)
         } catch {

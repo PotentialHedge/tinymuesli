@@ -326,6 +326,35 @@ private struct FakeDiarizer: Diarizer {
         #expect(joined.segments.map(\.start) == [0, 100, 102])
     }
 
+    @Test func unkeptAudioStaysUntilItsTimeIsUp() async throws {
+        let folder = try makeFolder()
+        let processor = MeetingProcessor(transcriber: FakeTranscriber(phrases: []), diarizer: nil, keepAudio: false,
+                                         deleteAudioAfter: AudioRetention.grace)
+        _ = try await processor.process(folder: folder)
+        let audio = folder.appendingPathComponent(MeetingFiles.audio)
+        #expect(FileManager.default.fileExists(atPath: audio.appendingPathComponent("mic.caf").path))
+
+        // Audio from before a resume, and audio kept on purpose (no mark), in the same store.
+        try FileManager.default.copyItem(at: audio, to: folder.appendingPathComponent("audio-1"))
+        let kept = try makeFolder()
+        let md = kept.appendingPathComponent(MeetingFiles.transcript)
+        var metadata = MeetingMetadata(parsing: try String(contentsOf: md, encoding: .utf8))!
+        metadata.status = .done
+        try metadata.frontmatter().write(to: md, atomically: true, encoding: .utf8)
+
+        let store = MeetingStore(root: folder.deletingLastPathComponent())
+        let keptStore = MeetingStore(root: kept.deletingLastPathComponent())
+        #expect(AudioRetention.expired(in: store, now: .now + 60).isEmpty)
+        let expired = AudioRetention.expired(in: store, now: .now + AudioRetention.grace + 60)
+        #expect(Set(expired.map(\.lastPathComponent)) == ["audio", "audio-1"])
+        #expect(AudioRetention.expired(in: keptStore, now: .distantFuture).isEmpty)
+
+        // Processed again with audio kept: the mark comes off.
+        let keeping = MeetingProcessor(transcriber: FakeTranscriber(phrases: []), diarizer: nil, keepAudio: true)
+        _ = try await keeping.process(folder: folder)
+        #expect(AudioRetention.expiry(of: audio) == nil)
+    }
+
     @Test func keepsAudioWhenAsked() async throws {
         let folder = try makeFolder()
         let processor = MeetingProcessor(transcriber: FakeTranscriber(phrases: []), diarizer: nil, keepAudio: true)

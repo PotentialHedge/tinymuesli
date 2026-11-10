@@ -134,7 +134,7 @@ private struct RecordingSettings: View {
                 }
                 Toggle(isOn: $model.keepAudio) {
                     Text("Keep Audio After Transcribing")
-                    Text("Off: only the transcript is kept.")
+                    Text("Off: the audio is deleted 24 hours after transcribing, so a meeting can still be transcribed again until then.")
                 }
                 if AppleIntelligence.status != .notEligible {
                     IntelligenceSettings(model: model)
