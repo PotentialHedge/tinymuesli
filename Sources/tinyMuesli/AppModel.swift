@@ -289,10 +289,16 @@ final class AppModel {
         }
     }
 
-    func startRecording(app: MeetingApp?) {
+    /// - Parameter resuming: a finished meeting to carry on recording in (see `resumable`), else a new one.
+    func startRecording(app: MeetingApp?, resuming: URL? = nil) {
         if case .recording = status { return }
         notifications.removePrompt()
         finishEndedMeeting()  // starting afresh: the ended meeting won't be continued
+        if let resuming {
+            // Its final pass may have started again meanwhile; it rewrites the files.
+            guard !isInUse(resuming) else { return }
+            notifications.removeMeetingEnded(folder: resuming)
+        }
         Task {
             guard await MicRecorder.requestPermission() else {
                 lastError = "tinyMuesli needs microphone access. Enable it in System Settings → Privacy & Security → Microphone."
@@ -302,8 +308,10 @@ final class AppModel {
             let transcriber = try? await AppleSpeechTranscriber.make(preferred: language.map(Locale.init(identifier:)))
             do {
                 if skipSilence, speechDetector == nil { loadSpeechDetector() }  // for the next meeting
-                let session = try RecordingSession(store: store, app: app, transcriber: transcriber,
-                                                   speechDetector: skipSilence ? speechDetector : nil)
+                let detector = skipSilence ? speechDetector : nil
+                let session = try resuming.map {
+                    try RecordingSession(resuming: $0, app: app, transcriber: transcriber, speechDetector: detector)
+                } ?? RecordingSession(store: store, app: app, transcriber: transcriber, speechDetector: detector)
                 session.offeredLanguages = languages
                 session.onLanguageSuggestion = { [weak self, weak session] suggestion in
                     guard let self, let session else { return }
@@ -351,6 +359,27 @@ final class AppModel {
     func startNewMeeting() {
         stopRecording(notify: false)
         startRecording(app: detector.current)
+    }
+
+    /// How long after a meeting ends it can still be resumed from the menu.
+    static let resumeWindow: TimeInterval = 2 * 60 * 60
+
+    /// The latest meeting, while it can be resumed: up to `resumeWindow` after it ended, once
+    /// transcribed, and only when nothing is being recorded or waiting to be continued.
+    var resumable: (folder: URL, title: String?)? {
+        guard !isRecording, ended == nil, let meeting = recentMeetings.first,
+              meeting.status == MeetingMetadata.Status.done.rawValue,
+              let end = meeting.end, Date.now.timeIntervalSince(end) < Self.resumeWindow
+        else { return nil }
+        let folder = URL(fileURLWithPath: meeting.path)
+        guard !isInUse(folder) else { return nil }
+        return (folder, meeting.title ?? meeting.suggestedTitle)
+    }
+
+    /// Carries on recording the latest meeting, after its final pass (see `resumable`).
+    func resumeLastMeeting() {
+        guard let resumable else { return }
+        startRecording(app: detector.current, resuming: resumable.folder)
     }
 
     /// Carries on recording the meeting that ended in the last `continueWindow`.
@@ -1094,7 +1123,7 @@ final class AppModel {
         case .detected(let app):
             return "\(app.name) is using the microphone"
         case .recording(let session, _):
-            let since = session.startedAt.formatted(date: .omitted, time: .shortened)
+            let since = (session.resumedAt ?? session.startedAt).formatted(date: .omitted, time: .shortened)
             return "Recording \(session.appName ?? "meeting") since \(since)"
         }
     }

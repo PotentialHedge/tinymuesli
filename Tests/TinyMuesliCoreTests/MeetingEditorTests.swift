@@ -23,6 +23,14 @@ import Testing
         return folder
     }
 
+    @Test func resumedRoundTripsThroughFrontmatter() {
+        var metadata = MeetingMetadata(start: Date(timeIntervalSince1970: 1_800_000_000), app: nil, status: .done)
+        metadata.resumed = metadata.start + 5400
+        let parsed = MeetingMetadata(parsing: metadata.frontmatter())
+        #expect(parsed?.resumed == metadata.resumed)
+        #expect(parsed?.audioOffset == 5400)
+    }
+
     @Test func tagsRoundTripThroughFrontmatter() {
         let metadata = MeetingMetadata(start: Date(timeIntervalSince1970: 0), app: "Zoom", status: .done,
                                        speakers: ["Me", "Ann, B"], tags: ["standup", "q4: plan"])

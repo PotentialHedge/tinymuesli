@@ -123,6 +123,9 @@ private struct MenuContent: View {
                 }
             }
         }
+        if let resumable = model.resumable {
+            Button(resumable.title.map { "Resume \($0)" } ?? "Resume Last Meeting") { model.resumeLastMeeting() }
+        }
         if let ended = model.ended {
             Button("Continue \(AppModel.title(of: ended.session))") { model.continueMeeting() }
             Button("Finish \(AppModel.title(of: ended.session)) Now") { model.finishEndedMeeting() }

@@ -227,6 +227,14 @@ public struct MeetingMetadata: Sendable, Equatable {
     /// Set in the Meetings window; kept when the final pass re-runs.
     public var tags: [String]
     public var error: String?
+    /// When recording last resumed after the meeting had been finished (see `RecordingSession.init(resuming:)`).
+    /// The audio in `audio/` starts here; the transcript before it is kept as it was.
+    public var resumed: Date?
+
+    /// Seconds into the meeting where the audio in `audio/` starts: 0 unless it was resumed.
+    public var audioOffset: Double {
+        resumed.map { max(0, $0.timeIntervalSince(start)) } ?? 0
+    }
 
     public init(start: Date, end: Date? = nil, title: String? = nil, app: String?, status: Status, language: String? = nil,
                 speakers: [String] = [], tags: [String] = [], error: String? = nil) {
@@ -251,6 +259,7 @@ public struct MeetingMetadata: Sendable, Equatable {
             lines.append("end: \(iso.string(from: end))")
             lines.append("duration: \(Self.duration(end.timeIntervalSince(start)))")
         }
+        if let resumed { lines.append("resumed: \(iso.string(from: resumed))") }
         if let app { lines.append("app: \(Self.yamlString(app))") }
         if let language { lines.append("language: \(language)") }
         if !languageSwitches.isEmpty {
@@ -279,6 +288,7 @@ public struct MeetingMetadata: Sendable, Equatable {
         guard let start = values["date"].flatMap(iso.date(from:)) else { return nil }
         self.start = start
         end = values["end"].flatMap(iso.date(from:))
+        resumed = values["resumed"].flatMap(iso.date(from:))
         title = values["title"].map(Self.unquote).flatMap { $0.isEmpty ? nil : $0 }
         app = values["app"].map(Self.unquote)
         status = values["status"].flatMap(Status.init(rawValue:)) ?? .recorded

@@ -15,6 +15,8 @@ public final class RecordingSession {
     public let appID: String?
     public let appName: String?
     public let startedAt: Date
+    /// Set when this recording carries on a meeting that had already been finished (see `init(resuming:)`).
+    public let resumedAt: Date?
     /// Set while capture is paused: the meeting app left the mic, but the meeting may yet continue.
     public private(set) var pausedAt: Date?
     /// Non-fatal problems, e.g. system audio failed but the mic is recording.
@@ -25,6 +27,8 @@ public final class RecordingSession {
     private let transcriber: Transcriber?
     private let speechDetector: SpeechDetectorFactory?
     private let live: LiveTranscript
+    /// Seconds into the meeting where this recording's audio starts (0 unless resumed).
+    private let offset: Double
     private var streams: [Track: LanguageSwitchingStream] = [:]
     private var monitors: [Track: MonitorBox] = [:]
     private var checking: Set<Track> = []
@@ -44,12 +48,61 @@ public final class RecordingSession {
         appID = app?.id
         appName = app?.name
         startedAt = now
+        resumedAt = nil
+        offset = 0
         self.transcriber = transcriber
         self.speechDetector = speechDetector
         live = LiveTranscript(
             url: folder.appendingPathComponent(MeetingFiles.transcript),
             metadata: MeetingMetadata(start: now, app: app?.name, status: .recording, language: transcriber?.language)
         )
+    }
+
+    public enum ResumeError: LocalizedError {
+        case notFinished
+
+        public var errorDescription: String? {
+            switch self {
+            case .notFinished: "Only a meeting that has been transcribed can be resumed."
+            }
+        }
+    }
+
+    /// Carries on a meeting that has already been finished and transcribed, in its folder. The new
+    /// audio is a part of its own, starting `now` into the meeting (so transcript times keep
+    /// counting from its start); the final pass adds it after the transcript so far (see
+    /// `MeetingMetadata.resumed`). Audio kept from before moves to `audio-1/` (`audio-2/`...).
+    /// `app`: the meeting app now on the mic, if any; the meeting keeps its own name.
+    public init(resuming folder: URL, app: MeetingApp?, transcriber: Transcriber? = nil,
+                speechDetector: SpeechDetectorFactory? = nil, now: Date = .now) throws {
+        let md = folder.appendingPathComponent(MeetingFiles.transcript)
+        guard var metadata = (try? String(contentsOf: md, encoding: .utf8)).flatMap(MeetingMetadata.init(parsing:)),
+              metadata.status == .done
+        else { throw ResumeError.notFinished }
+        let earlier = (try? MeetingProcessor.document(in: folder).segments) ?? []
+
+        let fm = FileManager.default
+        let audio = folder.appendingPathComponent(MeetingFiles.audio)
+        if fm.fileExists(atPath: audio.path) {
+            var n = 1
+            while fm.fileExists(atPath: folder.appendingPathComponent("\(MeetingFiles.audio)-\(n)").path) { n += 1 }
+            try fm.moveItem(at: audio, to: folder.appendingPathComponent("\(MeetingFiles.audio)-\(n)"))
+        }
+
+        self.folder = folder
+        appID = app?.id
+        appName = metadata.app
+        startedAt = metadata.start
+        resumedAt = now
+        offset = max(0, now.timeIntervalSince(metadata.start))
+        self.transcriber = transcriber
+        self.speechDetector = speechDetector
+        metadata.status = .recording
+        metadata.end = nil
+        metadata.error = nil
+        metadata.resumed = now
+        if metadata.language == nil { metadata.language = transcriber?.language }
+        live = LiveTranscript(url: md, metadata: metadata, earlier: earlier, offset: offset)
     }
 
     /// You're muted: the mic track records silence until unmuted, so it stays aligned with the other.
@@ -151,7 +204,8 @@ public final class RecordingSession {
         let start = stream.switchLanguage(to: language, from: time)
         live.cut(track, from: start)
         monitors[track]?.switched(to: language)
-        live.update { $0.languageSwitches.append(LanguageSwitch(track: track, time: start, language: language)) }
+        // In meeting time, like the transcript: a resumed meeting's audio starts partway in.
+        live.update { $0.languageSwitches.append(LanguageSwitch(track: track, time: start + offset, language: language)) }
     }
 
     public func decline(_ suggestion: LanguageSuggestion) {

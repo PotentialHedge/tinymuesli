@@ -70,6 +70,15 @@ public struct Segment: Codable, Sendable, Equatable {
         self.text = text
         self.confidence = confidence
     }
+
+    /// The same segment `seconds` later, for audio that starts partway into the meeting.
+    public func shifted(by seconds: Double) -> Segment {
+        guard seconds != 0 else { return self }
+        var s = self
+        s.start = (start + seconds).rounded(toPlaces: 2)
+        s.end = (end + seconds).rounded(toPlaces: 2)
+        return s
+    }
 }
 
 public enum SpeakerLabel {
@@ -222,10 +231,13 @@ public struct MicVoices: Codable, Sendable, Equatable {
     public var segments: [Segment]
     /// A voice embedding per "Voice n" (not for "Me").
     public var embeddings: [String: [Float]]
+    /// Where these segments start in a resumed meeting: the mic before it isn't split.
+    public var from: Double?
 
-    public init(segments: [Segment], embeddings: [String: [Float]]) {
+    public init(segments: [Segment], embeddings: [String: [Float]], from: Double? = nil) {
         self.segments = segments
         self.embeddings = embeddings
+        self.from = from
     }
 
     public static let placeholderPrefix = "Voice "
@@ -253,7 +265,7 @@ public struct MicVoices: Codable, Sendable, Equatable {
             s.speaker = names[s.speaker] ?? SpeakerLabel.me
             return s
         }
-        let result = segments.filter { $0.track != .mic } + mic
+        let result = segments.filter { $0.track != .mic || $0.start < (from ?? 0) } + mic
         return (result.sorted { ($0.start, $0.track == .mic ? 0 : 1) < ($1.start, $1.track == .mic ? 0 : 1) }, names)
     }
 
@@ -268,7 +280,11 @@ extension TranscriptBuilder {
     /// Splits the mic track by voice. Voices with less than `minimumSpeech` seconds of words are
     /// counted as "Me": diarizers often hear one person's odd moments as someone else. Nil when
     /// only one voice is left.
-    public static func micVoices(mic: [Phrase], diarization: Diarization, minimumSpeech: Double = 5) -> MicVoices? {
+    ///
+    /// `others`: voices known not to be you (people heard earlier in a resumed meeting). A voice
+    /// that sounds like one of them isn't taken for Me even if it speaks most.
+    public static func micVoices(mic: [Phrase], diarization: Diarization, minimumSpeech: Double = 5,
+                                 others knownOthers: [[Float]] = []) -> MicVoices? {
         let turns = diarization.turns
         guard Set(turns.map(\.speaker)).count > 1 else { return nil }
         let identity = Dictionary(turns.map { ($0.speaker, $0.speaker) }, uniquingKeysWith: { a, _ in a })
@@ -280,7 +296,13 @@ extension TranscriptBuilder {
         for run in runs {
             speech[run.speaker, default: 0] += run.words.reduce(0) { $0 + max(0, $1.end - audibleStart($1)) }
         }
-        guard let main = speech.max(by: { $0.value < $1.value })?.key else { return nil }
+        let known = knownOthers.map(VoiceMatcher.normalized)
+        func isSomeoneElse(_ id: String) -> Bool {
+            guard let embedding = diarization.embeddings[id].map(VoiceMatcher.normalized) else { return false }
+            return known.contains { VoiceMatcher.dot($0, embedding) >= VoiceMatcher.threshold }
+        }
+        let candidates = speech.filter { !isSomeoneElse($0.key) }
+        guard let main = (candidates.isEmpty ? speech : candidates).max(by: { $0.value < $1.value })?.key else { return nil }
         let others = speech.filter { $0.key != main && $0.value >= minimumSpeech }.keys
         guard !others.isEmpty else { return nil }
 

@@ -58,7 +58,17 @@ public struct MeetingProcessor: Sendable {
             defer { if systemTrack.isTemporary { try? fm.removeItem(at: systemTrack.url) } }
             let (micURL, systemURL) = (micTrack.url, systemTrack.url)
 
-            let switches = metadata.languageSwitches
+            // A resumed meeting: the audio is only the latest part, and what came before stays.
+            let offset = metadata.audioOffset
+            var earlier: [Segment] = []
+            if offset > 0, let document = try? Self.document(in: folder) {
+                earlier = document.segments.filter { $0.start < offset }
+            }
+            let earlierVoices = offset > 0 ? VoiceMatcher.voices(in: folder) : []
+            // Switches are written in meeting time; the audio counts from the offset.
+            let switches = metadata.languageSwitches.filter { $0.time >= offset }.map {
+                LanguageSwitch(track: $0.track, time: $0.time - offset, language: $0.language)
+            }
             async let micPhrases = phrases(for: .mic, url: micURL, live: live[.mic], switches: switches, log: log)
             async let systemPhrases = phrases(for: .system, url: systemURL, live: live[.system], switches: switches, log: log)
             let mic = try await micPhrases
@@ -84,7 +94,8 @@ public struct MeetingProcessor: Sendable {
             if !mic.isEmpty, let diarizer, fm.fileExists(atPath: micURL.path) {
                 log("Diarizing microphone audio…")
                 if let micDiarization = try? await diarizer.diarize(file: micURL) {
-                    micVoices = TranscriptBuilder.micVoices(mic: mic, diarization: micDiarization)
+                    micVoices = TranscriptBuilder.micVoices(mic: mic, diarization: micDiarization,
+                                                            others: earlierVoices.map(\.embedding))
                 }
             }
 
@@ -98,9 +109,16 @@ public struct MeetingProcessor: Sendable {
                     let split = micVoices.applied(to: segments)
                     segments = split.segments
                     voices.add(micVoices, names: split.names)
-                } else {
-                    try micVoices.encoded().write(to: offerURL, options: .atomic)
                 }
+            }
+            if offset > 0 {
+                (segments, voices.speakers) = Self.join(earlier: earlier, earlierVoices: earlierVoices,
+                                                        part: segments, partVoices: voices.speakers, offset: offset)
+            }
+            if var micVoices, metadata.app != nil {
+                micVoices.segments = micVoices.segments.map { $0.shifted(by: offset) }
+                micVoices.from = offset > 0 ? offset : nil
+                try micVoices.encoded().write(to: offerURL, options: .atomic)
             }
             let document = TranscriptDocument(
                 start: metadata.start, end: metadata.end, app: metadata.app,
@@ -157,6 +175,59 @@ public struct MeetingProcessor: Sendable {
             }
         }
         return legs
+    }
+
+    static func document(in folder: URL) throws -> TranscriptDocument {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(TranscriptDocument.self, from: Data(contentsOf: folder.appendingPathComponent(MeetingFiles.json)))
+    }
+
+    /// Adds a resumed part (`part`, timed from its own start) after the transcript so far. Its
+    /// speakers are recognised by voice: one who sounds like someone earlier gets their name (even
+    /// one you gave them), anyone else a new "Speaker n".
+    static func join(earlier: [Segment], earlierVoices: [SpeakerEmbeddings.Speaker],
+                     part: [Segment], partVoices: [SpeakerEmbeddings.Speaker],
+                     offset: Double) -> (segments: [Segment], voices: [SpeakerEmbeddings.Speaker]) {
+        let numbers = (earlier.map(\.speaker) + earlierVoices.map(\.name)).compactMap { name in
+            name.wholeMatch(of: /Speaker (\d+)/).flatMap { Int($0.1) }
+        }
+        var next = numbers.max() ?? 0
+        let placeholders = Set(part.map(\.speaker) + partVoices.map(\.name))
+            .filter { $0 != SpeakerLabel.others && VoiceMatcher.isPlaceholder($0) }
+
+        // Closest pairs first, each earlier name used once.
+        var pairs: [(new: String, old: String, similarity: Double)] = []
+        for voice in partVoices where placeholders.contains(voice.name) {
+            let embedding = VoiceMatcher.normalized(voice.embedding)
+            for old in earlierVoices where old.name != SpeakerLabel.me {
+                let similarity = VoiceMatcher.dot(embedding, VoiceMatcher.normalized(old.embedding))
+                if similarity >= VoiceMatcher.threshold { pairs.append((voice.name, old.name, similarity)) }
+            }
+        }
+        var names: [String: String] = [:]
+        for pair in pairs.sorted(by: { $0.similarity > $1.similarity })
+        where names[pair.new] == nil && !names.values.contains(pair.old) {
+            names[pair.new] = pair.old
+        }
+        // The rest in order of first appearance.
+        for segment in part.sorted(by: { $0.start < $1.start }) where placeholders.contains(segment.speaker) && names[segment.speaker] == nil {
+            next += 1
+            names[segment.speaker] = "Speaker \(next)"
+        }
+        for voice in partVoices where placeholders.contains(voice.name) && names[voice.name] == nil {
+            next += 1
+            names[voice.name] = "Speaker \(next)"
+        }
+
+        let shifted = part.map { segment in
+            var s = segment.shifted(by: offset)
+            s.speaker = names[s.speaker] ?? s.speaker
+            return s
+        }
+        let voices = earlierVoices + partVoices.map { SpeakerEmbeddings.Speaker(name: names[$0.name] ?? $0.name, embedding: $0.embedding) }
+        let segments = (earlier + shifted).sorted { ($0.start, $0.track == .mic ? 0 : 1) < ($1.start, $1.track == .mic ? 0 : 1) }
+        return (segments, voices.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
     }
 
     private func write(metadata: MeetingMetadata, body: String, to url: URL) throws {
@@ -223,10 +294,15 @@ public final class LiveTranscript: @unchecked Sendable {
     private let lock = NSLock()
     private var metadata: MeetingMetadata
     private var phrases: [Track: [Phrase]] = [:]
+    /// A resumed meeting's transcript so far, and where the new audio starts.
+    private let earlier: [Segment]
+    private let offset: Double
 
-    public init(url: URL, metadata: MeetingMetadata) {
+    public init(url: URL, metadata: MeetingMetadata, earlier: [Segment] = [], offset: Double = 0) {
         self.url = url
         self.metadata = metadata
+        self.earlier = earlier
+        self.offset = offset
     }
 
     public func add(_ phrase: Phrase, track: Track) {
@@ -252,7 +328,8 @@ public final class LiveTranscript: @unchecked Sendable {
     }
 
     private func write() {
-        let segments = TranscriptBuilder.segments(mic: phrases[.mic] ?? [], system: phrases[.system] ?? [], turns: nil)
+        let segments = earlier + TranscriptBuilder.segments(mic: phrases[.mic] ?? [], system: phrases[.system] ?? [], turns: nil)
+            .map { $0.shifted(by: offset) }
         let body = TranscriptRenderer.markdown(segments)
         let text = metadata.frontmatter() + (body.isEmpty ? "" : "\n" + body + "\n")
         try? text.write(to: url, atomically: true, encoding: .utf8)

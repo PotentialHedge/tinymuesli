@@ -119,6 +119,15 @@ private func phrase(_ text: String, at start: Double, step: Double = 0.5) -> Phr
         #expect(applied.names == ["Voice 1": "Speaker 3"])
     }
 
+    @Test func aVoiceHeardEarlierIsntMeEvenIfItSpeaksMost() {
+        let mic = [phrase(Array(repeating: "word", count: 16).joined(separator: " "), at: 0),
+                   phrase(Array(repeating: "word", count: 20).joined(separator: " "), at: 20)]
+        let turns = [SpeakerTurn(speaker: "A", start: 0, end: 10), SpeakerTurn(speaker: "B", start: 20, end: 32)]
+        let voices = TranscriptBuilder.micVoices(mic: mic, diarization: Diarization(turns: turns, embeddings: ["A": [1, 0], "B": [0, 1]]),
+                                                 others: [[0.1, 1]])
+        #expect(voices?.segments.map(\.speaker) == ["Me", "Voice 1"])
+    }
+
     @Test func oneVoiceOnTheMicIsNoSplit() {
         let mic = [phrase("one two three four five six seven eight nine ten eleven twelve", at: 0)]
         let turns = [SpeakerTurn(speaker: "A", start: 0, end: 5.8), SpeakerTurn(speaker: "B", start: 5.8, end: 6.5)]
@@ -261,6 +270,60 @@ private struct FakeDiarizer: Diarizer {
             #expect(result.document.speakers == ["Me"])
             #expect(MeetingEditor(folder: folder).micVoices?.voices == ["Voice 1"])
         }
+    }
+
+    /// Resumed an hour in, after a final pass named Speaker 1 "Ann": the new audio's words come
+    /// after the earlier ones, and the voice that sounds like Ann is called Ann again.
+    @Test func resumedMeetingAddsThePartAfterTheTranscriptSoFar() async throws {
+        let folder = try makeFolder()
+        let md = folder.appendingPathComponent(MeetingFiles.transcript)
+        var metadata = MeetingMetadata(parsing: try String(contentsOf: md, encoding: .utf8))!
+        let earlier = [Segment(start: 1, end: 2, speaker: "Me", track: .mic, text: "Before the break."),
+                       Segment(start: 3, end: 4, speaker: "Ann", track: .system, text: "See you in an hour."),
+                       Segment(start: 5, end: 6, speaker: "Speaker 2", track: .system, text: "Bye.")]
+        try TranscriptDocument(start: metadata.start, end: nil, app: "Zoom", language: "en-US", segments: earlier).encoded()
+            .write(to: folder.appendingPathComponent(MeetingFiles.json))
+        try SpeakerEmbeddings(speakers: [.init(name: "Ann", embedding: [0.1, 0.2]), .init(name: "Speaker 2", embedding: [1, -1])])
+            .encoded().write(to: folder.appendingPathComponent(MeetingFiles.speakers))
+        metadata.resumed = metadata.start + 3600
+        try metadata.frontmatter().write(to: md, atomically: true, encoding: .utf8)
+
+        let processor = MeetingProcessor(transcriber: FakeTranscriber(phrases: [phrase("welcome back", at: 1)]),
+                                         diarizer: FakeDiarizer(), keepAudio: false)
+        let result = try await processor.process(folder: folder, live: [.mic: [phrase("I'm back", at: 0)]])
+
+        #expect(result.document.segments.map(\.text) == ["Before the break.", "See you in an hour.", "Bye.", "I'm back", "welcome back"])
+        #expect(result.document.segments.map(\.speaker) == ["Me", "Ann", "Speaker 2", "Me", "Ann"])
+        #expect(result.document.segments[4].start == 3601)
+        #expect(VoiceMatcher.voices(in: folder).map(\.name) == ["Ann", "Ann", "Speaker 2"])
+        #expect(MeetingMetadata(parsing: try String(contentsOf: md, encoding: .utf8))?.resumed == metadata.resumed)
+    }
+
+    @MainActor @Test func resumingMovesKeptAudioAsideAndNeedsAFinishedMeeting() throws {
+        let folder = try makeFolder()
+        #expect(throws: RecordingSession.ResumeError.self) { try RecordingSession(resuming: folder, app: nil) }
+        let md = folder.appendingPathComponent(MeetingFiles.transcript)
+        var metadata = MeetingMetadata(parsing: try String(contentsOf: md, encoding: .utf8))!
+        metadata.status = .done
+        try metadata.frontmatter().write(to: md, atomically: true, encoding: .utf8)
+
+        let session = try RecordingSession(resuming: folder, app: nil, now: metadata.start + 600)
+        #expect(session.startedAt == metadata.start)
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("audio-1/mic.caf").path))
+        #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("audio").path))
+    }
+
+    @Test func aNewVoiceInAResumedPartGetsTheNextNumber() {
+        let joined = MeetingProcessor.join(
+            earlier: [Segment(start: 0, end: 1, speaker: "Speaker 3", track: .system, text: "a")],
+            earlierVoices: [.init(name: "Speaker 3", embedding: [1, 0])],
+            part: [Segment(start: 0, end: 1, speaker: "Speaker 1", track: .system, text: "b"),
+                   Segment(start: 2, end: 3, speaker: "Speaker 2", track: .system, text: "c")],
+            partVoices: [.init(name: "Speaker 1", embedding: [0, 1]), .init(name: "Speaker 2", embedding: [0.9, 0.1])],
+            offset: 100
+        )
+        #expect(joined.segments.map(\.speaker) == ["Speaker 3", "Speaker 4", "Speaker 3"])
+        #expect(joined.segments.map(\.start) == [0, 100, 102])
     }
 
     @Test func keepsAudioWhenAsked() async throws {
