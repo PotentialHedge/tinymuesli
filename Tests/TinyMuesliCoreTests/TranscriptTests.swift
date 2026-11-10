@@ -99,6 +99,31 @@ private func phrase(_ text: String, at start: Double, step: Double = 0.5) -> Phr
         )
         #expect(segments.map(\.text) == ["first", "second", "third"])
     }
+
+    @Test func splitsTheMicIntoVoicesAndKeepsMeForTheMainOne() {
+        // Me speaks 0-10 s, someone else 20-30 s, and a 1 s blip the diarizer called a third voice.
+        let mic = [phrase("one two three four five six seven eight nine ten eleven twelve", at: 0),
+                   phrase("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda", at: 20),
+                   phrase("blip blop", at: 40)]
+        let turns = [SpeakerTurn(speaker: "A", start: 0, end: 10), SpeakerTurn(speaker: "B", start: 20, end: 30),
+                     SpeakerTurn(speaker: "C", start: 40, end: 41)]
+        let voices = TranscriptBuilder.micVoices(mic: mic, diarization: Diarization(turns: turns, embeddings: ["B": [1], "C": [2]]),
+                                                 minimumSpeech: 3)
+        #expect(voices?.segments.map(\.speaker) == ["Me", "Voice 1", "Me"])
+        #expect(voices?.embeddings == ["Voice 1": [1]])
+
+        // Applied to a call's transcript: the new voice is numbered after the system's speakers.
+        let system = Segment(start: 15, end: 16, speaker: "Speaker 2", track: .system, text: "hi")
+        let applied = voices!.applied(to: [Segment(start: 0, end: 50, speaker: "Me", track: .mic, text: "all of it"), system])
+        #expect(applied.segments.map(\.speaker) == ["Me", "Speaker 2", "Speaker 3", "Me"])
+        #expect(applied.names == ["Voice 1": "Speaker 3"])
+    }
+
+    @Test func oneVoiceOnTheMicIsNoSplit() {
+        let mic = [phrase("one two three four five six seven eight nine ten eleven twelve", at: 0)]
+        let turns = [SpeakerTurn(speaker: "A", start: 0, end: 5.8), SpeakerTurn(speaker: "B", start: 5.8, end: 6.5)]
+        #expect(TranscriptBuilder.micVoices(mic: mic, diarization: Diarization(turns: turns, embeddings: [:])) == nil)
+    }
 }
 
 @Suite struct TranscriptRendererTests {
@@ -167,21 +192,24 @@ private final class FakeStream: TranscriptionStream, @unchecked Sendable {
 
 private struct FakeDiarizer: Diarizer {
     var fails = false
+    /// What the microphone track hears; one voice by default.
+    var mic: Diarization?
     func prepare() async throws {}
     func diarize(file: URL) async throws -> Diarization {
         if fails { throw CocoaError(.fileReadUnknown) }
+        if let mic, file.lastPathComponent.hasPrefix("mic") { return mic }
         return Diarization(turns: [SpeakerTurn(speaker: "7", start: 0, end: 100)], embeddings: ["7": [0.1, 0.2]])
     }
 }
 
 @Suite struct MeetingProcessorTests {
     /// A meeting folder with a frontmatter-only transcript and two short silent tracks.
-    private func makeFolder() throws -> URL {
+    private func makeFolder(app: String? = "Zoom") throws -> URL {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("tinymuesli-test-\(UUID().uuidString)")
             .appendingPathComponent("2026-11-04 1030 Zoom")
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("audio"), withIntermediateDirectories: true)
-        let meta = MeetingMetadata(start: .now, end: .now + 60, app: "Zoom", status: .recorded)
+        let meta = MeetingMetadata(start: .now, end: .now + 60, app: app, status: .recorded)
         try meta.frontmatter().write(to: folder.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
         let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
         for name in ["mic", "system"] {
@@ -212,6 +240,27 @@ private struct FakeDiarizer: Diarizer {
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("transcript.json").path))
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("speakers.json").path))
         #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("audio").path))
+    }
+
+    /// Two people on the mic: split right away without a meeting app, only offered in a call.
+    @Test(arguments: [nil, "Zoom"]) func splitsMeWhenTheMicHearsTwoVoices(app: String?) async throws {
+        let folder = try makeFolder(app: app)
+        let mic = Diarization(turns: [SpeakerTurn(speaker: "a", start: 0, end: 10), SpeakerTurn(speaker: "b", start: 20, end: 30)],
+                              embeddings: ["a": [1, 0], "b": [0, 1]])
+        let processor = MeetingProcessor(transcriber: FakeTranscriber(phrases: []), diarizer: FakeDiarizer(mic: mic), keepAudio: true)
+        // Both over the 5 s of speech a voice needs to count; the first says more, so it's Me.
+        func words(_ n: Int) -> String { Array(repeating: "word", count: n).joined(separator: " ") }
+        let live: [Track: [Phrase]] = [.mic: [phrase(words(19), at: 0), phrase(words(16), at: 20)]]
+        let result = try await processor.process(folder: folder, live: live)
+        let offer = folder.appendingPathComponent(MeetingFiles.micVoices)
+        if app == nil {
+            #expect(result.document.speakers == ["Me", "Speaker 1"])
+            #expect(!FileManager.default.fileExists(atPath: offer.path))
+            #expect(VoiceMatcher.voices(in: folder).map(\.name) == ["Speaker 1"])
+        } else {
+            #expect(result.document.speakers == ["Me"])
+            #expect(MeetingEditor(folder: folder).micVoices?.voices == ["Voice 1"])
+        }
     }
 
     @Test func keepsAudioWhenAsked() async throws {

@@ -188,7 +188,7 @@ public enum TranscriptBuilder {
         return best
     }
 
-    private static func segment(from words: [Word], fallback: Phrase?, speaker: String, track: Track) -> Segment? {
+    static func segment(from words: [Word], fallback: Phrase?, speaker: String, track: Track) -> Segment? {
         let text: String
         let start: Double
         let end: Double
@@ -208,6 +208,100 @@ public enum TranscriptBuilder {
         let confidences = words.compactMap(\.confidence)
         let confidence = confidences.isEmpty ? nil : (confidences.reduce(0, +) / Double(confidences.count)).rounded(toPlaces: 2)
         return Segment(start: start, end: end, speaker: speaker, track: track, text: trimmed, confidence: confidence)
+    }
+}
+
+/// The microphone heard as more than one voice: a recording of a room rather than a call, or
+/// someone talking next to you. "Me" is the voice that speaks most; the others are "Voice 1"...
+/// (by first appearance) until `applied(to:)` gives them speaker names.
+///
+/// Recordings without a meeting app get this right away. In a call it's only offered (saved as
+/// `mic-voices.json`), since there the microphone is almost always just you.
+public struct MicVoices: Codable, Sendable, Equatable {
+    /// Every mic-track segment, labelled "Me" or "Voice n".
+    public var segments: [Segment]
+    /// A voice embedding per "Voice n" (not for "Me").
+    public var embeddings: [String: [Float]]
+
+    public init(segments: [Segment], embeddings: [String: [Float]]) {
+        self.segments = segments
+        self.embeddings = embeddings
+    }
+
+    public static let placeholderPrefix = "Voice "
+
+    /// "Voice 1", "Voice 2"... in order of first appearance.
+    public var voices: [String] {
+        var seen: [String] = []
+        for s in segments where s.speaker != SpeakerLabel.me && !seen.contains(s.speaker) { seen.append(s.speaker) }
+        return seen
+    }
+
+    /// `segments` with the mic track replaced by these voices, each voice named "Speaker n" after
+    /// the highest number in use. Returns the names given, keyed by voice.
+    public func applied(to segments: [Segment]) -> (segments: [Segment], names: [String: String]) {
+        var next = segments.compactMap { s in
+            s.speaker.wholeMatch(of: /Speaker (\d+)/).flatMap { Int($0.1) }
+        }.max() ?? 0
+        var names: [String: String] = [:]
+        for voice in voices {
+            next += 1
+            names[voice] = "Speaker \(next)"
+        }
+        let mic = self.segments.map { s in
+            var s = s
+            s.speaker = names[s.speaker] ?? SpeakerLabel.me
+            return s
+        }
+        let result = segments.filter { $0.track != .mic } + mic
+        return (result.sorted { ($0.start, $0.track == .mic ? 0 : 1) < ($1.start, $1.track == .mic ? 0 : 1) }, names)
+    }
+
+    public func encoded() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(self)
+    }
+}
+
+extension TranscriptBuilder {
+    /// Splits the mic track by voice. Voices with less than `minimumSpeech` seconds of words are
+    /// counted as "Me": diarizers often hear one person's odd moments as someone else. Nil when
+    /// only one voice is left.
+    public static func micVoices(mic: [Phrase], diarization: Diarization, minimumSpeech: Double = 5) -> MicVoices? {
+        let turns = diarization.turns
+        guard Set(turns.map(\.speaker)).count > 1 else { return nil }
+        let identity = Dictionary(turns.map { ($0.speaker, $0.speaker) }, uniquingKeysWith: { a, _ in a })
+        let runs = mic.flatMap { phrase in
+            speakerRuns(words: phrase.words.isEmpty ? [Word(text: phrase.text, start: phrase.start, end: phrase.end)] : phrase.words,
+                        turns: turns, names: identity)
+        }
+        var speech: [String: Double] = [:]
+        for run in runs {
+            speech[run.speaker, default: 0] += run.words.reduce(0) { $0 + max(0, $1.end - audibleStart($1)) }
+        }
+        guard let main = speech.max(by: { $0.value < $1.value })?.key else { return nil }
+        let others = speech.filter { $0.key != main && $0.value >= minimumSpeech }.keys
+        guard !others.isEmpty else { return nil }
+
+        var names: [String: String] = [:]
+        for turn in turns.sorted(by: { $0.start < $1.start }) where names[turn.speaker] == nil {
+            names[turn.speaker] = others.contains(turn.speaker)
+                ? MicVoices.placeholderPrefix + "\(names.values.filter { $0 != SpeakerLabel.me }.count + 1)"
+                : SpeakerLabel.me
+        }
+        var segments: [Segment] = []
+        for phrase in mic {
+            let words = phrase.words.isEmpty ? [Word(text: phrase.text, start: phrase.start, end: phrase.end)] : phrase.words
+            for run in speakerRuns(words: words, turns: turns, names: names) {
+                segments += [segment(from: run.words, fallback: nil, speaker: run.speaker, track: .mic)].compactMap { $0 }
+            }
+        }
+        var embeddings: [String: [Float]] = [:]
+        for (id, embedding) in diarization.embeddings {
+            if let name = names[id], name != SpeakerLabel.me { embeddings[name] = embedding }
+        }
+        return MicVoices(segments: segments, embeddings: embeddings)
     }
 }
 

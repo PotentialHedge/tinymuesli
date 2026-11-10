@@ -8,6 +8,8 @@ public enum MeetingFiles {
     public static let speakers = "speakers.json"
     /// Title, tags and speaker names suggested by Apple's on-device model (see `MeetingSuggester`).
     public static let suggestions = "suggestions.json"
+    /// The microphone split into voices, offered for a call where it heard more than you (see `MicVoices`).
+    public static let micVoices = "mic-voices.json"
     public static let audio = "audio"
     /// The first file of each track; a continued meeting can add `mic-2.caf` etc. (see `TrackSegments`).
     public static let micAudio = "audio/mic.caf"
@@ -77,15 +79,39 @@ public struct MeetingProcessor: Sendable {
                 }
             }
 
-            let segments = TranscriptBuilder.segments(mic: mic, system: system, turns: diarization?.turns)
+            // The mic is "Me", unless it heard several people: a room, or someone beside you.
+            var micVoices: MicVoices?
+            if !mic.isEmpty, let diarizer, fm.fileExists(atPath: micURL.path) {
+                log("Diarizing microphone audio…")
+                if let micDiarization = try? await diarizer.diarize(file: micURL) {
+                    micVoices = TranscriptBuilder.micVoices(mic: mic, diarization: micDiarization)
+                }
+            }
+
+            var segments = TranscriptBuilder.segments(mic: mic, system: system, turns: diarization?.turns)
+            var voices = diarization.map(SpeakerEmbeddings.init(diarization:)) ?? SpeakerEmbeddings(speakers: [])
+            let offerURL = folder.appendingPathComponent(MeetingFiles.micVoices)
+            try? fm.removeItem(at: offerURL)
+            if let micVoices {
+                if metadata.app == nil {
+                    // Not a call: everyone in the room is on the mic, so split it straight away.
+                    let split = micVoices.applied(to: segments)
+                    segments = split.segments
+                    voices.add(micVoices, names: split.names)
+                } else {
+                    try micVoices.encoded().write(to: offerURL, options: .atomic)
+                }
+            }
             let document = TranscriptDocument(
                 start: metadata.start, end: metadata.end, app: metadata.app,
                 language: transcriber.language, segments: segments
             )
             try document.encoded().write(to: folder.appendingPathComponent(MeetingFiles.json), options: .atomic)
-            if let diarization, !diarization.embeddings.isEmpty {
-                try SpeakerEmbeddings(diarization: diarization).encoded()
-                    .write(to: folder.appendingPathComponent(MeetingFiles.speakers), options: .atomic)
+            let voicesURL = folder.appendingPathComponent(MeetingFiles.speakers)
+            if voices.speakers.isEmpty {
+                try? fm.removeItem(at: voicesURL)  // from an earlier pass
+            } else {
+                try voices.encoded().write(to: voicesURL, options: .atomic)
             }
 
             metadata.status = .done
@@ -170,6 +196,16 @@ public struct SpeakerEmbeddings: Codable, Sendable {
         speakers = diarization.embeddings
             .compactMap { id, embedding in names[id].map { Speaker(name: $0, embedding: embedding) } }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    init(speakers: [Speaker]) {
+        self.speakers = speakers
+    }
+
+    /// Adds the voices split off the microphone, under the names they were given.
+    mutating func add(_ mic: MicVoices, names: [String: String]) {
+        speakers += mic.embeddings.compactMap { voice, embedding in names[voice].map { Speaker(name: $0, embedding: embedding) } }
+        speakers.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func encoded() throws -> Data {

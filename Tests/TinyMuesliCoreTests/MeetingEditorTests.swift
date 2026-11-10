@@ -80,4 +80,29 @@ import Testing
         #expect(Set(suggestions.map { "\($0.speaker)=\($0.name)" }) == ["Speaker 1=Bob", "Speaker 2=Ann"])
         #expect(matcher.suggestions(for: earlier).isEmpty)
     }
+
+    @Test func splitsMeWhenOfferedAndMergesAVoiceBack() throws {
+        let folder = try makeMeeting(voices: ["Speaker 1": [1, 0], "Speaker 2": [0, 1]])
+        let offer = MicVoices(segments: [
+            Segment(start: 0, end: 1, speaker: "Me", track: .mic, text: "Hi."),
+            Segment(start: 1, end: 2, speaker: "Voice 1", track: .mic, text: "Hello from the room."),
+        ], embeddings: ["Voice 1": [0.5, 0.5]])
+        try offer.encoded().write(to: folder.appendingPathComponent(MeetingFiles.micVoices))
+        let editor = MeetingEditor(folder: folder)
+        #expect(editor.micVoices == offer)
+        try editor.splitMe()
+
+        let chat = ChatTranscript.load(folder: folder)
+        #expect(chat.speakers == ["Me", "Speaker 3", "Speaker 1", "Speaker 2"])
+        #expect(chat.messages.first { $0.speaker == "Speaker 3" }?.isMe == false)
+        #expect(editor.micVoices == nil)
+        #expect(VoiceMatcher.voices(in: folder).map(\.name) == ["Speaker 1", "Speaker 2", "Speaker 3"])
+
+        // Someone from the call can't become Me; a voice from the mic can go back.
+        #expect(throws: MeetingEditor.EditError.reservedName("Me")) { try editor.merge(speaker: "Speaker 1", into: "Me") }
+        try editor.merge(speaker: "Speaker 3", into: "Me")
+        #expect(ChatTranscript.load(folder: folder).speakers == ["Me", "Speaker 1", "Speaker 2"])
+        // "Me" isn't a voice to recognise elsewhere.
+        #expect(VoiceMatcher.voices(in: folder).map(\.name) == ["Speaker 1", "Speaker 2"])
+    }
 }

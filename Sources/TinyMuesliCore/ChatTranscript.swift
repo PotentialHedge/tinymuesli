@@ -8,8 +8,10 @@ public struct ChatTranscript: Sendable, Equatable {
     public struct Message: Sendable, Equatable, Identifiable {
         public var id: Int
         public var speaker: String
-        /// Said by the user (mic track).
+        /// Said by the user ("Me": the mic track, less any other voices split off it).
         public var isMe: Bool
+        /// Heard through the microphone, not the computer (so it can be merged into "Me").
+        public var fromMic: Bool
         /// Seconds from the start of the recording.
         public var start: Double
         public var end: Double
@@ -89,8 +91,8 @@ public struct ChatTranscript: Sendable, Equatable {
                 last.end = max(last.end, segment.end)
                 result[result.count - 1] = last
             } else {
-                result.append(Message(id: result.count, speaker: segment.speaker, isMe: segment.track == .mic,
-                                      start: segment.start, end: segment.end, text: segment.text))
+                result.append(Message(id: result.count, speaker: segment.speaker, isMe: segment.speaker == SpeakerLabel.me,
+                                      fromMic: segment.track == .mic, start: segment.start, end: segment.end, text: segment.text))
             }
         }
         return result
@@ -103,7 +105,7 @@ public struct ChatTranscript: Sendable, Equatable {
         for (i, turn) in turns.enumerated() {
             let start = seconds(turn.timestamp)
             result.append(Message(id: i, speaker: turn.speaker, isMe: turn.speaker == SpeakerLabel.me,
-                                  start: start, end: start, text: turn.text.trimmingCharacters(in: .whitespacesAndNewlines)))
+                                  fromMic: turn.speaker == SpeakerLabel.me, start: start, end: start, text: turn.text.trimmingCharacters(in: .whitespacesAndNewlines)))
             if i > 0 { result[i - 1].end = max(result[i - 1].start, start) }
         }
         return result

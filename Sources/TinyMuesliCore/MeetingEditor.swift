@@ -58,6 +58,11 @@ public struct MeetingEditor: Sendable {
         guard !new.isEmpty else { throw EditError.invalidName }
         guard old != new else { return }
         guard new != SpeakerLabel.me, old != SpeakerLabel.me else { throw EditError.reservedName(SpeakerLabel.me) }
+        try relabel(old, to: new)
+    }
+
+    /// Renames without the checks; `new` may be "Me" (see `merge`).
+    private func relabel(_ old: String, to new: String) throws {
         var metadata = try readMetadata()
         // The final pass rewrites these files; a meeting still being recorded has no speakers yet.
         guard metadata.status == .done else { throw EditError.notFinished }
@@ -75,6 +80,8 @@ public struct MeetingEditor: Sendable {
             for i in voices.speakers.indices where voices.speakers[i].name == old {
                 voices.speakers[i].name = new
             }
+            // "Me" isn't a voice to recognise in other meetings: it's the microphone.
+            voices.speakers.removeAll { $0.name == SpeakerLabel.me }
             try voices.encoded().write(to: speakersURL, options: .atomic)
         }
         try document.encoded().write(to: jsonURL, options: .atomic)
@@ -84,10 +91,57 @@ public struct MeetingEditor: Sendable {
 
     /// Gives `speaker`'s lines to `target`, another speaker in this meeting, for when diarization
     /// heard one person as two. Unlike `rename`, the target has to exist already.
+    ///
+    /// The target can be "Me" for a voice split off the microphone (see `splitMe`), but not for
+    /// someone heard through the computer.
     public func merge(speaker: String, into target: String) throws {
         let speakers = try readMetadata().speakers
         for name in [speaker, target] where !speakers.contains(name) { throw EditError.unknownSpeaker(name) }
-        try rename(speaker: speaker, to: target)
+        if target == SpeakerLabel.me, speaker != SpeakerLabel.me {
+            guard try micOnly(speaker) else { throw EditError.reservedName(SpeakerLabel.me) }
+            guard try readMetadata().status == .done else { throw EditError.notFinished }
+            try relabel(speaker, to: target)
+        } else {
+            try rename(speaker: speaker, to: target)
+        }
+    }
+
+    /// Whether everything `speaker` said came through the microphone, so they can be merged into "Me".
+    public func micOnly(_ speaker: String) throws -> Bool {
+        let segments = try readDocument().segments.filter { $0.speaker == speaker }
+        return !segments.isEmpty && segments.allSatisfy { $0.track == .mic }
+    }
+
+    /// The microphone's voices, when it heard more than you during a call and that's on offer.
+    public var micVoices: MicVoices? {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent(MeetingFiles.micVoices)) else { return nil }
+        return try? JSONDecoder().decode(MicVoices.self, from: data)
+    }
+
+    /// Splits "Me" into the voices the microphone heard: everyone but the main voice becomes a new
+    /// "Speaker n", which can be named (or merged back into Me) like any other.
+    public func splitMe() throws {
+        var metadata = try readMetadata()
+        guard metadata.status == .done else { throw EditError.notFinished }
+        guard let micVoices else { return }
+        let document = try readDocument()
+        let split = micVoices.applied(to: document.segments)
+        let updated = TranscriptDocument(start: document.start, end: document.end, app: document.app,
+                                         language: document.language, segments: split.segments)
+        var voices = (try? JSONDecoder().decode(SpeakerEmbeddings.self, from: Data(contentsOf: speakersURL)))
+            ?? SpeakerEmbeddings(speakers: [])
+        voices.add(micVoices, names: split.names)
+        if !voices.speakers.isEmpty { try voices.encoded().write(to: speakersURL, options: .atomic) }
+        try updated.encoded().write(to: jsonURL, options: .atomic)
+        metadata.speakers = updated.speakers
+        try write(metadata: metadata, body: TranscriptRenderer.markdown(updated.segments))
+        try FileManager.default.removeItem(at: folder.appendingPathComponent(MeetingFiles.micVoices))
+    }
+
+    private func readDocument() throws -> TranscriptDocument {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(TranscriptDocument.self, from: Data(contentsOf: jsonURL))
     }
 
     private func readMetadata() throws -> MeetingMetadata {

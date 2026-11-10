@@ -49,6 +49,9 @@ struct MeetingDetails: View {
     @State private var error: String?
     /// The merge waiting for confirmation: whose lines, and who gets them.
     @State private var pendingMerge: (speaker: String, target: String)?
+    /// The voices the microphone heard besides you, when splitting "Me" is on offer.
+    @State private var micVoices: MicVoices?
+    @State private var confirmingSplit = false
 
     private var metadata: MeetingMetadata? { transcript.metadata }
     /// The recorder and the final pass rewrite the files from their own copy, so edits wait for them.
@@ -96,6 +99,18 @@ struct MeetingDetails: View {
             Button("Cancel", role: .cancel) {}
         } message: { merge in
             Text("Everything \(merge.speaker) said (\(stats(for: merge.speaker))) becomes \(merge.target)'s. This can't be undone, short of transcribing the meeting again.")
+        }
+        .task(id: transcript) {
+            let editor = MeetingEditor(folder: folder)
+            micVoices = await Task.detached(priority: .utility) { editor.micVoices }.value
+        }
+        .confirmationDialog("Split Me into \((micVoices?.voices.count ?? 0) + 1) speakers?", isPresented: $confirmingSplit) {
+            Button("Split") {
+                perform { try MeetingEditor(folder: folder).splitMe() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("What the microphone heard from other voices becomes theirs, as new speakers you can name. If one turns out to be you, merge it back into Me.")
         }
         .alert("Couldn't Save", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
@@ -184,10 +199,24 @@ struct MeetingDetails: View {
                     knownNames: knownNames.filter { !transcript.speakers.contains($0) },
                     canRename: canRename,
                     rename: { name in perform { try MeetingEditor(folder: folder).rename(speaker: speaker, to: name) } },
-                    mergeTargets: transcript.speakers.filter { $0 != speaker && $0 != SpeakerLabel.me },
+                    mergeTargets: transcript.speakers.filter { $0 != speaker && ($0 != SpeakerLabel.me || micOnly(speaker)) },
                     merge: { target in pendingMerge = (speaker, target) }
                 )
                 .id(speaker)
+            }
+            if canRename, let micVoices, !micVoices.voices.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.2.wave.2")
+                        .foregroundStyle(.secondary)
+                    Text(micVoices.voices.count == 1
+                         ? "The microphone heard someone besides you."
+                         : "The microphone heard \(micVoices.voices.count) people besides you.")
+                    Spacer()
+                    Button("Split Me…") { confirmingSplit = true }
+                        .controlSize(.small)
+                }
+                .font(.callout)
+                .help("Gives what the other voices said on your microphone to speakers of their own.")
             }
         } header: {
             Text("Speakers")
@@ -198,6 +227,12 @@ struct MeetingDetails: View {
                 Text("Speakers can be named once the meeting has been transcribed.")
             }
         }
+    }
+
+    /// Everything they said came through the microphone: a voice split off "Me", which can go back.
+    private func micOnly(_ speaker: String) -> Bool {
+        let messages = transcript.messages.filter { $0.speaker == speaker }
+        return !messages.isEmpty && messages.allSatisfy(\.fromMic)
     }
 
     private func stats(for speaker: String) -> String {
@@ -257,7 +292,7 @@ private struct SpeakerRow: View {
     let knownNames: [String]
     let canRename: Bool
     let rename: (String) -> Void
-    /// The other speakers this one can be merged into (not "Me", whose lines come from the microphone).
+    /// The other speakers this one can be merged into ("Me" only for voices split off the microphone).
     let mergeTargets: [String]
     let merge: (String) -> Void
     @State private var name = ""
