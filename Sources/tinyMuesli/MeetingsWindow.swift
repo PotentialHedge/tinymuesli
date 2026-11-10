@@ -786,6 +786,9 @@ private struct ChatView: View {
     private var transcript: ChatTranscript { session.folder == folder ? session.transcript : ChatTranscript(metadata: nil, messages: []) }
     private var suggestions: [SpeakerSuggestion] { session.folder == folder ? session.suggestions : [] }
     @State private var renameError: String?
+    /// How many voices besides you the microphone heard, when splitting "Me" is on offer (see `MicVoices`).
+    @State private var otherMicVoices = 0
+    @State private var confirmingSplit = false
     /// Index into `matchIDs` of the match scrolled to.
     @State private var currentMatch = 0
     /// The message under the pointer, which shows its time.
@@ -878,6 +881,9 @@ private struct ChatView: View {
                 }
             }
             .defaultScrollAnchor(isLive ? .bottom : .top)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if otherMicVoices > 0, transcript.metadata?.status == .done { splitMeBanner }
+            }
             .onChange(of: transcript.messages.count) { old, new in
                 // Follow a live meeting, like a chat does.
                 if isLive, old > 0, new > old, query.isEmpty {
@@ -950,6 +956,17 @@ private struct ChatView: View {
                 .help(showsDetails ? "Hide details" : "Show tags and speakers")
                 .keyboardShortcut("i", modifiers: .command)
             }
+        }
+        .task(id: "\(folder.path)|\(transcript.metadata?.status.rawValue ?? "")|\(transcript.speakers.joined(separator: "|"))") {
+            let editor = MeetingEditor(folder: folder)
+            let count = await Task.detached(priority: .userInitiated) { editor.micVoices?.voices.count ?? 0 }.value
+            if session.folder == editor.folder { otherMicVoices = count }
+        }
+        .confirmationDialog("Split Me into \(otherMicVoices + 1) speakers?", isPresented: $confirmingSplit) {
+            Button("Split") { editSplit { try $0.splitMe() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("What the microphone heard from the other \(otherMicVoices == 1 ? "voice" : "voices") becomes theirs, as new speakers you can name. If one turns out to be you, merge it back into Me in the details.")
         }
         .task(id: "\(folder.path)|\(transcript.speakers.joined(separator: "|"))") {
             let folder = folder, store = store
@@ -1101,6 +1118,43 @@ private struct ChatView: View {
                 handoff = nil
             }
         }
+    }
+
+    /// Below the title: the microphone may have heard more than you.
+    private var splitMeBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.2.wave.2")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("“Me” may be more than one person").fontWeight(.medium)
+                Text(otherMicVoices == 1
+                     ? "The microphone heard another voice besides yours."
+                     : "The microphone heard \(otherMicVoices) other voices besides yours.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Keep as Me") { editSplit { try $0.keepMe() } }
+                .help("It was just you: dismiss this")
+            Button("Split Me…") { confirmingSplit = true }
+                .buttonStyle(.borderedProminent)
+                .help("Give the other voices on your microphone speakers of their own")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func editSplit(_ edit: (MeetingEditor) throws -> Void) {
+        do {
+            try edit(MeetingEditor(folder: folder))
+            otherMicVoices = 0
+        } catch {
+            renameError = error.localizedDescription
+        }
+        onEdited()
     }
 
     private func reloadIfChanged(force: Bool = false) {

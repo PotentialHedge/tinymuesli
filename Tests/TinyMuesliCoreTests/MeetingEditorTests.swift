@@ -98,6 +98,9 @@ import Testing
         try offer.encoded().write(to: folder.appendingPathComponent(MeetingFiles.micVoices))
         let editor = MeetingEditor(folder: folder)
         #expect(editor.micVoices == offer)
+        try editor.keepMe()
+        #expect(editor.micVoices == nil)
+        try offer.encoded().write(to: folder.appendingPathComponent(MeetingFiles.micVoices))
         try editor.splitMe()
 
         let chat = ChatTranscript.load(folder: folder)

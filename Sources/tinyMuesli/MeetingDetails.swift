@@ -49,9 +49,6 @@ struct MeetingDetails: View {
     @State private var error: String?
     /// The merge waiting for confirmation: whose lines, and who gets them.
     @State private var pendingMerge: (speaker: String, target: String)?
-    /// The voices the microphone heard besides you, when splitting "Me" is on offer.
-    @State private var micVoices: MicVoices?
-    @State private var confirmingSplit = false
 
     private var metadata: MeetingMetadata? { transcript.metadata }
     /// The recorder and the final pass rewrite the files from their own copy, so edits wait for them.
@@ -99,18 +96,6 @@ struct MeetingDetails: View {
             Button("Cancel", role: .cancel) {}
         } message: { merge in
             Text("Everything \(merge.speaker) said (\(stats(for: merge.speaker))) becomes \(merge.target)'s. This can't be undone, short of transcribing the meeting again.")
-        }
-        .task(id: transcript) {
-            let editor = MeetingEditor(folder: folder)
-            micVoices = await Task.detached(priority: .utility) { editor.micVoices }.value
-        }
-        .confirmationDialog("Split Me into \((micVoices?.voices.count ?? 0) + 1) speakers?", isPresented: $confirmingSplit) {
-            Button("Split") {
-                perform { try MeetingEditor(folder: folder).splitMe() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("What the microphone heard from other voices becomes theirs, as new speakers you can name. If one turns out to be you, merge it back into Me.")
         }
         .alert("Couldn't Save", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
@@ -203,20 +188,6 @@ struct MeetingDetails: View {
                     merge: { target in pendingMerge = (speaker, target) }
                 )
                 .id(speaker)
-            }
-            if canRename, let micVoices, !micVoices.voices.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "person.2.wave.2")
-                        .foregroundStyle(.secondary)
-                    Text(micVoices.voices.count == 1
-                         ? "The microphone heard someone besides you."
-                         : "The microphone heard \(micVoices.voices.count) people besides you.")
-                    Spacer()
-                    Button("Split Me…") { confirmingSplit = true }
-                        .controlSize(.small)
-                }
-                .font(.callout)
-                .help("Gives what the other voices said on your microphone to speakers of their own.")
             }
         } header: {
             Text("Speakers")

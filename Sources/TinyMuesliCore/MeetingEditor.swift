@@ -138,6 +138,12 @@ public struct MeetingEditor: Sendable {
         try FileManager.default.removeItem(at: folder.appendingPathComponent(MeetingFiles.micVoices))
     }
 
+    /// Turns down the offer to split "Me": the microphone was just you after all.
+    public func keepMe() throws {
+        let url = folder.appendingPathComponent(MeetingFiles.micVoices)
+        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+    }
+
     private func readDocument() throws -> TranscriptDocument {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
