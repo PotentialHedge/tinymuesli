@@ -47,6 +47,8 @@ struct MeetingDetails: View {
     @State private var title = ""
     @FocusState private var titleFocused: Bool
     @State private var error: String?
+    /// The merge waiting for confirmation: whose lines, and who gets them.
+    @State private var pendingMerge: (speaker: String, target: String)?
 
     private var metadata: MeetingMetadata? { transcript.metadata }
     /// The recorder and the final pass rewrite the files from their own copy, so edits wait for them.
@@ -83,6 +85,18 @@ struct MeetingDetails: View {
         .onChange(of: metadata?.title, initial: true) { title = metadata?.title ?? "" }
         // Closing the inspector or opening another meeting while typing.
         .onDisappear(perform: commitTitle)
+        .confirmationDialog(
+            pendingMerge.map { "Merge “\($0.speaker)” into “\($0.target)”?" } ?? "",
+            isPresented: Binding(get: { pendingMerge != nil }, set: { if !$0 { pendingMerge = nil } }),
+            presenting: pendingMerge
+        ) { merge in
+            Button("Merge") {
+                perform { try MeetingEditor(folder: folder).merge(speaker: merge.speaker, into: merge.target) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { merge in
+            Text("Everything \(merge.speaker) said (\(stats(for: merge.speaker))) becomes \(merge.target)'s. This can't be undone, short of transcribing the meeting again.")
+        }
         .alert("Couldn't Save", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
         } message: {
@@ -169,7 +183,9 @@ struct MeetingDetails: View {
                     suggestion: suggestions.first { $0.speaker == speaker },
                     knownNames: knownNames.filter { !transcript.speakers.contains($0) },
                     canRename: canRename,
-                    rename: { name in perform { try MeetingEditor(folder: folder).rename(speaker: speaker, to: name) } }
+                    rename: { name in perform { try MeetingEditor(folder: folder).rename(speaker: speaker, to: name) } },
+                    mergeTargets: transcript.speakers.filter { $0 != speaker && $0 != SpeakerLabel.me },
+                    merge: { target in pendingMerge = (speaker, target) }
                 )
                 .id(speaker)
             }
@@ -177,7 +193,7 @@ struct MeetingDetails: View {
             Text("Speakers")
         } footer: {
             if canRename {
-                Text("Names are written into the transcript files. Give two speakers the same name to merge them. Voices you name are recognised in other meetings.")
+                Text("Names are written into the transcript files. If one person was heard as two, merge them with \(Image(systemName: "arrow.triangle.merge")). Voices you name are recognised in other meetings.")
             } else if metadata?.status != .failed {
                 Text("Speakers can be named once the meeting has been transcribed.")
             }
@@ -241,6 +257,9 @@ private struct SpeakerRow: View {
     let knownNames: [String]
     let canRename: Bool
     let rename: (String) -> Void
+    /// The other speakers this one can be merged into (not "Me", whose lines come from the microphone).
+    let mergeTargets: [String]
+    let merge: (String) -> Void
     @State private var name = ""
     @FocusState private var focused: Bool
     /// Set once renamed, so losing focus or disappearing afterwards doesn't rename again.
@@ -272,6 +291,17 @@ private struct SpeakerRow: View {
                 Text(isMe ? "Microphone" : stats)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if canMerge {
+                    Menu {
+                        mergeMenu
+                    } label: {
+                        Image(systemName: "arrow.triangle.merge")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Merge \(speaker) into another speaker")
+                }
             }
             if let suggestion, canRename {
                 HStack(spacing: 6) {
@@ -287,6 +317,21 @@ private struct SpeakerRow: View {
             }
         }
         .onAppear { name = speaker }
+        .contextMenu {
+            if canMerge {
+                Menu("Merge Into") { mergeMenu }
+            }
+        }
+    }
+
+    private var canMerge: Bool { !isMe && canRename && !mergeTargets.isEmpty }
+
+    @ViewBuilder private var mergeMenu: some View {
+        Section("Merge \(speaker) Into") {
+            ForEach(mergeTargets, id: \.self) { target in
+                Button(target) { merge(target) }
+            }
+        }
     }
 
     private func icon(_ reason: SpeakerSuggestion.Reason) -> String {

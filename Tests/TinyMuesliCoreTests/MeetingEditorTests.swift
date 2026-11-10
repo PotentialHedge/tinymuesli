@@ -58,6 +58,18 @@ import Testing
         #expect(throws: MeetingEditor.EditError.reservedName("Me")) { try editor.rename(speaker: "Speaker 1", to: "Me") }
     }
 
+    @Test func mergesIntoAnExistingSpeakerOnly() throws {
+        let folder = try makeMeeting(voices: ["Speaker 1": [1, 0], "Speaker 2": [0, 1]])
+        let editor = MeetingEditor(folder: folder)
+        #expect(throws: MeetingEditor.EditError.unknownSpeaker("Ann")) { try editor.merge(speaker: "Speaker 1", into: "Ann") }
+        #expect(throws: MeetingEditor.EditError.reservedName("Me")) { try editor.merge(speaker: "Speaker 1", into: "Me") }
+        try editor.merge(speaker: "Speaker 1", into: "Speaker 2")
+        let text = try String(contentsOf: folder.appendingPathComponent(MeetingFiles.transcript), encoding: .utf8)
+        #expect(MeetingMetadata(parsing: text)?.speakers == ["Me", "Speaker 2"])
+        // Both voices are kept under the one name, so either is recognised in other meetings.
+        #expect(VoiceMatcher.voices(in: folder).map(\.name) == ["Speaker 2", "Speaker 2"])
+    }
+
     @Test func suggestsNamedVoicesFromOtherMeetings() throws {
         let earlier = try makeMeeting(voices: ["Ann": [1, 0, 0], "Bob": [0, 1, 0]])
         let later = try makeMeeting(voices: ["Speaker 1": [0.1, 0.9, 0], "Speaker 2": [0.9, 0.2, 0.1], "Speaker 3": [0, 0, 1]])

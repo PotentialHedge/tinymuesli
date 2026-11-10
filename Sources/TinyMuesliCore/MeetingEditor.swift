@@ -8,12 +8,14 @@ public struct MeetingEditor: Sendable {
         case notFinished
         case invalidName
         case reservedName(String)
+        case unknownSpeaker(String)
 
         public var errorDescription: String? {
             switch self {
             case .notFinished: "This meeting can be edited once it has been transcribed."
             case .invalidName: "Enter a name."
             case .reservedName(let name): "“\(name)” is reserved."
+            case .unknownSpeaker(let name): "No one in this meeting is called “\(name)”."
             }
         }
     }
@@ -78,6 +80,14 @@ public struct MeetingEditor: Sendable {
         try document.encoded().write(to: jsonURL, options: .atomic)
         metadata.speakers = document.speakers
         try write(metadata: metadata, body: TranscriptRenderer.markdown(document.segments))
+    }
+
+    /// Gives `speaker`'s lines to `target`, another speaker in this meeting, for when diarization
+    /// heard one person as two. Unlike `rename`, the target has to exist already.
+    public func merge(speaker: String, into target: String) throws {
+        let speakers = try readMetadata().speakers
+        for name in [speaker, target] where !speakers.contains(name) { throw EditError.unknownSpeaker(name) }
+        try rename(speaker: speaker, to: target)
     }
 
     private func readMetadata() throws -> MeetingMetadata {
