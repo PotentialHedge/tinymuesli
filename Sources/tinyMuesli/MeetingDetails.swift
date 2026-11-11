@@ -234,6 +234,7 @@ struct MeetingDetails: View {
                     LabeledContent("Length", value: AppModel.length(end.timeIntervalSince(metadata.start)))
                 }
                 if let app = metadata.app { LabeledContent("App", value: app) }
+                if let sharedBy = metadata.sharedBy { LabeledContent("Shared By", value: sharedBy) }
                 if let language = metadata.language {
                     LabeledContent("Language", value: Self.languages(start: language, switches: metadata.languageSwitches))
                 }

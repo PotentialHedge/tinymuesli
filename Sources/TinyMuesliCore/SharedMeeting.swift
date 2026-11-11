@@ -181,10 +181,11 @@ public struct SharedMeeting: Codable, Sendable, Equatable {
         if let folder = existing(in: store) { return (folder, false) }
         let document = TranscriptDocument(start: transcript.start, end: transcript.end, app: transcript.app,
                                           language: transcript.language, segments: transcript.segments)
-        let metadata = MeetingMetadata(start: document.start, end: document.end,
+        var metadata = MeetingMetadata(start: document.start, end: document.end,
                                        title: title.flatMap { $0.isEmpty ? nil : $0 }, app: document.app, status: .done,
                                        language: document.language, speakers: document.speakers,
                                        tags: MeetingEditor.cleanTags(tags))
+        metadata.sharedBy = sharedBy
         let folder = try store.makeMeetingFolder(start: document.start, appName: document.app)
         do {
             try document.encoded().write(to: folder.appendingPathComponent(MeetingFiles.json), options: .atomic)

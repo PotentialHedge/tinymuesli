@@ -390,7 +390,7 @@ final class AppModel {
     /// transcribed, and only when nothing is being recorded or waiting to be continued.
     var resumable: (folder: URL, title: String?)? {
         guard !isRecording, ended == nil, let meeting = recentMeetings.first,
-              meeting.status == MeetingMetadata.Status.done.rawValue,
+              meeting.status == MeetingMetadata.Status.done.rawValue, meeting.sharedBy == nil,
               let end = meeting.end, Date.now.timeIntervalSince(end) < Self.resumeWindow
         else { return nil }
         let folder = URL(fileURLWithPath: meeting.path)

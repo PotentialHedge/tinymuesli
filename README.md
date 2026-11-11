@@ -93,7 +93,7 @@ both.
 **Share** in the Meetings window's toolbar (or right-click a meeting: Share, Save as Web Page…)
 sends a finished meeting as a single web page. It shows the transcript as a chat and opens in any
 browser, so the recipient doesn't need tinyMuesli. If they have it, **Add to tinyMuesli** on the page
-adds the meeting to their meetings, after asking. The meeting travels inside the page's link, so
+adds the meeting to their meetings, after asking, marked with who shared it. The meeting travels inside the page's link, so
 nothing is uploaded anywhere. The page holds only the transcript: title, tags, times and who said
 what. Audio and voice prints stay on your Mac. "Me" is shown as your macOS account's full name.
 

@@ -1043,6 +1043,11 @@ private struct ChatView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                if let sharedBy = metadata.sharedBy {
+                    Label("Shared by \(sharedBy)", systemImage: "square.and.arrow.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if metadata.status == .failed, let error = metadata.error {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)

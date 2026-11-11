@@ -53,6 +53,13 @@ import Testing
         #expect(!html.contains("<everyone>"))
     }
 
+    @Test func sharedByRoundTripsThroughFrontmatter() {
+        var metadata = MeetingMetadata(start: start, app: "Zoom", status: .done)
+        metadata.sharedBy = "O'Brien, \"Ann\""
+        #expect(MeetingMetadata(parsing: metadata.frontmatter())?.sharedBy == "O'Brien, \"Ann\"")
+        #expect(MeetingMetadata(parsing: MeetingMetadata(start: start, app: nil, status: .done).frontmatter())?.sharedBy == nil)
+    }
+
     @Test func rejectsDamagedPayloads() {
         #expect(throws: SharedMeeting.ShareError.unreadable) { try SharedMeeting(payload: "not-a-meeting") }
         #expect(throws: SharedMeeting.ShareError.unreadable) { try SharedMeeting(html: "<html></html>") }
@@ -70,6 +77,7 @@ import Testing
         #expect(summary.status == "done")
         #expect(summary.title == "Roadmap \"Q4\"")
         #expect(summary.speakers == ["Ben", "Ann", "Speaker 2"])
+        #expect(summary.sharedBy == "Ben")
         #expect(!FileManager.default.fileExists(atPath: first.folder.appendingPathComponent(MeetingFiles.speakers).path))
         let chat = ChatTranscript.load(folder: first.folder)
         #expect(chat.messages.map(\.text) == shared.transcript.segments.map(\.text))
@@ -77,6 +85,8 @@ import Testing
 
         // Renaming a speaker afterwards doesn't make it a different meeting.
         try MeetingEditor(folder: first.folder).rename(speaker: "Speaker 2", to: "Cleo")
+        // Edits keep who shared it.
+        #expect(MeetingLibrary(store: store).summary(of: first.folder)?.sharedBy == "Ben")
         let second = try shared.add(to: store)
         #expect(!second.added)
         #expect(second.folder.resolvingSymlinksInPath() == first.folder.resolvingSymlinksInPath())
