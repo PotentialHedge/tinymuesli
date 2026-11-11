@@ -11,6 +11,8 @@
 # the zip with the Sparkle EdDSA key from this Mac's keychain, and uploads the zip and appcast.xml
 # to a release tagged v<version>, along with scripts/install.sh (the curl | sh installer, which
 # always fetches the latest release). The app's SUFeedURL points at the latest release's appcast.xml.
+# It also uploads tinyMuesli.dmg (scripts/make-dmg.sh), the drag-to-Applications installer that the
+# website's Download button links to; its name has no version, so the latest release's link is stable.
 #
 # The key's public half is SUPublicEDKey in Info.plist. Without the private half (made once with
 # .build/artifacts/sparkle/Sparkle/bin/generate_keys; back it up with its -x option) no update
@@ -45,6 +47,9 @@ ZIP="$OUT/tinyMuesli-$VERSION.zip"
 ditto -c -k --sequesterRsrc --keepParent build/tinyMuesli.app "$ZIP"
 # Signs the zip with the keychain key and writes $OUT/appcast.xml with one item, for this version.
 "$SPARKLE_BIN/generate_appcast" --download-url-prefix "https://github.com/$REPO/releases/download/$TAG/" "$OUT"
+# Made after the appcast, which would otherwise list the disk image as an update too.
+DMG="$OUT/tinyMuesli.dmg"
+scripts/make-dmg.sh build/tinyMuesli.app "$DMG"
 
 CASK="$OUT/tinymuesli.rb"
 cat > "$CASK" <<CASK
@@ -85,12 +90,12 @@ cask "tinymuesli" do
 end
 CASK
 
-echo "tinyMuesli $VERSION (build $BUILD): $ZIP, $OUT/appcast.xml"
+echo "tinyMuesli $VERSION (build $BUILD): $ZIP, $DMG, $OUT/appcast.xml"
 if [ "${DRY_RUN:-0}" = 1 ]; then
   echo "DRY_RUN: no release created"
   exit 0
 fi
-gh release create "$TAG" --repo "$REPO" --title "tinyMuesli $VERSION" --generate-notes "$ZIP" "$OUT/appcast.xml" scripts/install.sh
+gh release create "$TAG" --repo "$REPO" --title "tinyMuesli $VERSION" --generate-notes "$ZIP" "$DMG" "$OUT/appcast.xml" scripts/install.sh
 
 # Update the cask in the tap (the API needs the current file's blob sha to replace it).
 CASK_PATH="repos/$TAP_REPO/contents/Casks/tinymuesli.rb"

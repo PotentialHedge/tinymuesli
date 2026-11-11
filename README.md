@@ -42,9 +42,9 @@ If you already installed tinyMuesli another way, add `--adopt` so Homebrew takes
 
 Or by hand:
 
-1. Download the latest `tinyMuesli-<version>.zip` from
-   [Releases](https://github.com/PotentialHedge/tinymuesli/releases/latest) and open it.
-2. Drag `tinyMuesli.app` into your Applications folder.
+1. Download [tinyMuesli.dmg](https://github.com/PotentialHedge/tinymuesli/releases/latest/download/tinyMuesli.dmg)
+   and open it.
+2. Drag tinyMuesli onto the Applications folder in the window that opens, then eject the disk image.
 
 The app isn't notarized by Apple, so with Homebrew or a download from the browser, macOS refuses to
 open it the first time. Click **Done**, go to **System Settings → Privacy & Security**, scroll down to
@@ -153,7 +153,8 @@ git commit -am "Release 0.2.0"
 
 The script signs the archive with the Sparkle key in your keychain (`generate_keys -x <file>` from
 `.build/artifacts/sparkle/Sparkle/bin` exports it; keep a backup, since without it no update can be
-published to existing installs). `DRY_RUN=1` builds `build/release/` without publishing. The feed is
+published to existing installs). `DRY_RUN=1` builds `build/release/` without publishing. The release also carries `tinyMuesli.dmg`, the
+drag-to-Applications installer from `scripts/make-dmg.sh` (needs `uv` and `rsvg-convert`). The feed is
 on GitHub releases, so the repository has to be public for copies to fetch it.
 
 Releases are code-signed with the self-signed `Muesli Self-Signed` certificate in your keychain (it keeps the old name), or
