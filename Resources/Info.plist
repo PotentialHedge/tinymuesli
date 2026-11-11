@@ -13,7 +13,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.0</string>
+	<string>0.6.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -26,15 +26,15 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>8</string>
+	<string>9</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>tinyMuesli records the other participants in your meeting. Audio never leaves your Mac.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>When you share a meeting by email, tinyMuesli writes the transcript into a new email in Mail.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>tinyMuesli records the other participants in your meeting. Audio never leaves your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>tinyMuesli records your side of the meeting. Audio never leaves your Mac.</string>
 	<key>SUFeedURL</key>
