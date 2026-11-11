@@ -94,9 +94,11 @@ public struct MeetingProcessor: Sendable {
 
             // The mic is "Me", unless it heard several people: a room, or someone beside you.
             var micVoices: MicVoices?
+            var micDiarized = false
             if !mic.isEmpty, let diarizer, fm.fileExists(atPath: micURL.path) {
                 log("Diarizing microphone audio…")
                 if let micDiarization = try? await diarizer.diarize(file: micURL) {
+                    micDiarized = true
                     micVoices = TranscriptBuilder.micVoices(mic: mic, diarization: micDiarization,
                                                             others: earlierVoices.map(\.embedding))
                 }
@@ -123,10 +125,13 @@ public struct MeetingProcessor: Sendable {
                 micVoices.from = offset > 0 ? offset : nil
                 try micVoices.encoded().write(to: offerURL, options: .atomic)
             }
-            let document = TranscriptDocument(
+            let processing = Processing(transcription: transcriber.model,
+                                        diarization: diarization != nil || micDiarized ? diarizer?.model : nil)
+            var document = TranscriptDocument(
                 start: metadata.start, end: metadata.end, app: metadata.app,
                 language: transcriber.language, segments: segments
             )
+            document.processing = processing
             try document.encoded().write(to: folder.appendingPathComponent(MeetingFiles.json), options: .atomic)
             let voicesURL = folder.appendingPathComponent(MeetingFiles.speakers)
             if voices.speakers.isEmpty {
@@ -137,6 +142,8 @@ public struct MeetingProcessor: Sendable {
 
             metadata.status = .done
             metadata.speakers = document.speakers
+            metadata.transcribedBy = processing.transcription?.summary
+            metadata.speakersBy = processing.diarization?.summary
             try write(metadata: metadata, body: TranscriptRenderer.markdown(segments), to: mdURL)
 
             let audio = folder.appendingPathComponent(MeetingFiles.audio)

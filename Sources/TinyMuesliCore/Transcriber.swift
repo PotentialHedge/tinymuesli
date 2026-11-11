@@ -16,6 +16,13 @@ public protocol Transcriber: Sendable {
 
     /// `onPhrase` is called (from any thread) as each phrase is finalised.
     func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream
+
+    /// The engine and model, saved with the meeting. A plugin's model is known once it has answered.
+    var model: ModelInfo? { get }
+}
+
+extension Transcriber {
+    public var model: ModelInfo? { nil }
 }
 
 public protocol TranscriptionStream: AnyObject, Sendable {

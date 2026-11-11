@@ -367,6 +367,8 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
     public var language: String?
     public var speakers: [String]
     public var segments: [Segment]
+    /// What made it: tinyMuesli's version, the transcriber and the diarizer. Nil in older files.
+    public var processing: Processing?
 
     public init(start: Date, end: Date?, app: String?, language: String?, segments: [Segment]) {
         self.start = start

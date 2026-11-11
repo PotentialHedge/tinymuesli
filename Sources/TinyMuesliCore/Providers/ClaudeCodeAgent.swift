@@ -49,7 +49,7 @@ public struct ClaudeCodeAgent: MeetingAgent {
             "command": binaryPath, "args": ["mcp", "--root", store.root.path]]]]
         let mcpJSON = (try? JSONSerialization.data(withJSONObject: mcp, options: [.sortedKeys, .withoutEscapingSlashes]))
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        return ["-lc", "command -v claude >/dev/null || exit \(Self.notFound); exec claude \"$@\"", "tinymuesli",
+        return ["-lc", LoginShell.pathSetup + "command -v claude >/dev/null || exit \(Self.notFound); exec claude \"$@\"", "tinymuesli",
                 "-p", fullPrompt(folder: folder),
                 "--mcp-config", mcpJSON,
                 "--allowedTools", "mcp__tinymuesli",

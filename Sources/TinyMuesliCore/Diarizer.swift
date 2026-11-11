@@ -6,6 +6,12 @@ public protocol Diarizer: Sendable {
     /// Downloads models if needed. Safe to call repeatedly.
     func prepare() async throws
     func diarize(file: URL) async throws -> Diarization
+    /// The models, saved with the meeting.
+    nonisolated var model: ModelInfo? { get }
+}
+
+extension Diarizer {
+    public nonisolated var model: ModelInfo? { nil }
 }
 
 public struct Diarization: Sendable {
@@ -26,6 +32,10 @@ public struct Diarization: Sendable {
 /// `~/Library/Application Support/FluidAudio/Models`.
 public actor FluidDiarizer: Diarizer {
     private var manager: OfflineDiarizerManager?
+
+    /// Keep `version` in step with FluidAudio in Package.resolved.
+    public nonisolated let model: ModelInfo? = ModelInfo(id: "fluidaudio", name: "FluidAudio", version: "0.18.2",
+                                                         model: "pyannote segmentation + WeSpeaker + VBx")
 
     public init() {
         // FluidAudio logs every pipeline step at debug level to stderr.

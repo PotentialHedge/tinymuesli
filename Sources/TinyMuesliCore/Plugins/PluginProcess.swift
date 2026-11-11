@@ -72,7 +72,7 @@ final class PluginProcess: @unchecked Sendable {
         posix_spawnattr_setsigmask(&attributes, &none)
         Self.disclaimResponsibility(&attributes)
 
-        let arguments = ["/bin/zsh", "-lc", "exec \"$@\"", "tinymuesli-plugin"] + command
+        let arguments = ["/bin/zsh", "-lc", LoginShell.pathSetup + "exec \"$@\"", "tinymuesli-plugin"] + command
         let env = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }.map { "\($0.key)=\($0.value)" }
         var pid: pid_t = 0
         let status = Self.withCStrings(arguments) { argv in
@@ -225,4 +225,13 @@ public enum PluginError: Error, LocalizedError, Equatable, CustomStringConvertib
 
     /// Messages read the same wherever the error is printed with `"\(error)"`.
     public var description: String { errorDescription ?? "Plugin error" }
+}
+
+/// Programs are found through `zsh -lc`, as in Terminal. But a login shell that isn't interactive
+/// skips `~/.zshrc`, where installers like uv's and Claude Code's put `~/.local/bin` on the PATH; it
+/// only worked when tinyMuesli had been started from Terminal and so had Terminal's PATH. This goes
+/// before each such script and adds the usual places for tools after the login PATH.
+public enum LoginShell {
+    public static let pathSetup =
+        #"PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$HOME/.bun/bin"; "#
 }

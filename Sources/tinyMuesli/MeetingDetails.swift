@@ -242,6 +242,8 @@ struct MeetingDetails: View {
                 if let language = metadata.language {
                     LabeledContent("Language", value: Self.languages(start: language, switches: metadata.languageSwitches))
                 }
+                if let transcribedBy = metadata.transcribedBy { LabeledContent("Transcribed By", value: transcribedBy) }
+                if let speakersBy = metadata.speakersBy { LabeledContent("Speakers By", value: speakersBy) }
                 LabeledContent("Status", value: metadata.status.rawValue.capitalized)
             }
             Button("Show in Finder") {

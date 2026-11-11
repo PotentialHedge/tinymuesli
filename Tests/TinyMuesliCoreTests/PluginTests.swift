@@ -167,6 +167,56 @@ struct TestPlugin {
         #expect(!FileManager.default.fileExists(atPath: file))  // deleted afterwards
     }
 
+    @Test func savesTheModelThePluginSaysItUsed() async throws {
+        let test = try TestPlugin("""
+            {"id": "fake", "name": "Fake", "version": "2.1", "contributes": {"transcription": {"command": ["/bin/zsh", "t.sh"]}}}
+            """, scripts: ["t.sh": """
+            read -r line
+            print -r -- '{"phrases": [], "model": "big-v3"}'
+            """])
+        defer { test.remove() }
+        let transcriber = PluginTranscriber(plugin: test.plugin, contribution: test.plugin.manifest.contributes.transcription!,
+                                            language: "en-US", detectLanguage: false)
+        #expect(transcriber.model?.model == nil)
+        // Answered by a copy in another language: the meeting's transcriber still knows.
+        _ = try await (transcriber.inLanguage("de-DE") as! PluginTranscriber).transcribe(upload: test.directory.appendingPathComponent("t.sh"))
+        #expect(transcriber.model == ModelInfo(id: "fake", name: "Fake", version: "2.1", model: "big-v3"))
+    }
+
+    /// Both tracks are transcribed at once; a plugin running a model on this Mac must not load it twice.
+    @Test func runsAPluginsTranscriptionsOneAtATime() async throws {
+        let test = try TestPlugin("""
+            {"id": "serial", "name": "Serial", "contributes": {"transcription": {"command": ["/bin/zsh", "t.sh"]}}}
+            """, scripts: ["t.sh": """
+            read -r line
+            if ! mkdir running 2>/dev/null; then print -r -- overlap >> overlaps; fi
+            sleep 0.3
+            rmdir running
+            print -r -- '{"phrases": []}'
+            """])
+        defer { test.remove() }
+        let transcriber = PluginTranscriber(plugin: test.plugin, contribution: test.plugin.manifest.contributes.transcription!,
+                                            language: "en-US", detectLanguage: false)
+        let file = test.directory.appendingPathComponent("t.sh")
+        async let a = transcriber.transcribe(upload: file)
+        async let b = transcriber.transcribe(upload: file)
+        async let c = transcriber.transcribe(upload: file)
+        _ = try await (a, b, c)
+        #expect(!FileManager.default.fileExists(atPath: test.directory.appendingPathComponent("overlaps").path))
+    }
+
+    @Test func findsToolsInstalledOutsideTheLoginPath() async throws {
+        // ~/.local/bin is where uv and Claude Code install themselves, on the PATH only in ~/.zshrc.
+        let test = try TestPlugin("""
+            {"id": "path", "name": "Path", "contributes": {"agent": {"command": ["true"]}}}
+            """, scripts: [:])
+        defer { test.remove() }
+        let output = try await test.plugin.call(["/bin/sh", "-c", "printf %s \"$PATH\"; cat >/dev/null"], what: "test",
+                                                request: [:], settings: test.settings)
+        let path = String(decoding: output, as: UTF8.self).split(separator: ":").map(String.init)
+        #expect(path.contains(FileManager.default.homeDirectoryForCurrentUser.path + "/.local/bin"))
+    }
+
     @Test func streamsLiveAudioAndReadsPhrasesAsTheyCome() async throws {
         let manifest = """
             {"id": "live", "name": "Live", "contributes": {"transcription": {"command": ["/bin/zsh", "live.sh"], "live": true}}}

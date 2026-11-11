@@ -34,13 +34,15 @@ public struct PluginSuggestionProvider: SuggestionProvider {
             var title: String?
             var tags: [String]?
             var speakers: [MeetingSuggestions.SpeakerName]?
+            var model: String?
         }
         let answer: Answer
         do { answer = try JSONDecoder().decode(Answer.self, from: output) } catch {
             throw PluginError.badOutput(plugin: plugin.name, detail: "\(error)")
         }
         let suggestions = MeetingSuggestions(title: answer.title, tags: answer.tags ?? [], speakers: answer.speakers ?? [],
-                                             created: .now)
+                                             created: .now, model: ModelInfo(id: plugin.id, name: plugin.name,
+                                                                             version: plugin.manifest.version, model: answer.model))
         try suggestions.save(to: folder)
         return suggestions
     }

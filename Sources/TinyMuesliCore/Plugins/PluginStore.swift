@@ -211,7 +211,7 @@ public struct PluginStore: Sendable {
         guard !programs.isEmpty else { return [] }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "for p in \"$@\"; do command -v \"$p\" >/dev/null || print -r -- \"$p\"; done", "check"] + programs.sorted()
+        process.arguments = ["-lc", LoginShell.pathSetup + "for p in \"$@\"; do command -v \"$p\" >/dev/null || print -r -- \"$p\"; done", "check"] + programs.sorted()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

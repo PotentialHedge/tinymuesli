@@ -81,6 +81,8 @@ app: Zoom
 shared-by: Ann Lee               # optional: added from a page someone shared (see Sharing)
 language: en-US
 language-switches: [system 312.5 de-CH]   # optional: track, seconds into the meeting, language
+transcribed-by: Apple SpeechTranscriber macOS 26.2   # what transcribed it (a plugin: name version (model))
+speakers-by: FluidAudio 0.18.2 (pyannote segmentation + WeSpeaker + VBx)   # optional: what told speakers apart
 speakers: [Me, Speaker 1, Speaker 2]
 tags: [roadmap]                  # optional, as is title: (above date:)
 status: done
@@ -93,7 +95,9 @@ status: done
 
 `transcript.json` (`version: 1`) holds the same as segments (sentence-sized; times in seconds from
 the start of the recording; `track` is `mic` or `system`), plus `start`, `end`, `app`, `language`
-and `speakers`.
+and `speakers`, and `processing`: when the final pass ran, tinyMuesli's version, and the
+`transcription` and `diarization` engines (`id`, `name`, `version`, `model`). `suggestions.json` has
+the same for what suggested it, as `model`.
 
 Any search index is a derived cache that can be rebuilt from these files.
 

@@ -134,6 +134,13 @@ their meetings (BCP-47, e.g. `["de-CH", "en-US"]`): use them as hints for detect
 
 A phrase is a sentence or so. `words` is optional but makes speaker labels better. A word's text
 keeps its leading space, so the words join to the phrase's text. `confidence` (0–1) is optional.
+Add `"model": "…"` next to `phrases` to say which model transcribed it; it's saved with the meeting
+(`transcribed-by` in `transcript.md`, `processing` in `transcript.json`) along with your plugin's name
+and version.
+
+A plugin's calls run **one at a time**: the second track waits for the first. A model that runs on the
+Mac would otherwise be loaded twice at once; keep an eye on memory all the same, since it's shared with
+everything else on the Mac (and with the GPU).
 
 **Live** (`"live": true`). The program starts with the recording, once per track. Its first stdin
 line is the request:
@@ -163,6 +170,7 @@ style and reuse tags. Answer, all optional:
  "speakers": [{"speaker": "Speaker 2", "name": "Ben", "quote": "Thanks, Ben, over to you."}]}
 ```
 
+`"model": "…"` says which model suggested them (saved in `suggestions.json`).
 Nothing is renamed: these show as suggestions the user confirms. Calls time out after 10 minutes.
 
 ### Agent

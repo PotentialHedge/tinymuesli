@@ -49,6 +49,11 @@ public struct AppleSpeechTranscriber: Transcriber {
         AppleSpeechTranscriber(locale: Locale(identifier: language))
     }
 
+    /// Apple's models come with macOS (and its updates), so the OS version says which.
+    public var model: ModelInfo? {
+        ModelInfo(id: "apple", name: "Apple SpeechTranscriber", version: ModelInfo.macOS)
+    }
+
     public func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream {
         AppleTranscriptionStream(locale: locale, onPhrase: onPhrase)
     }

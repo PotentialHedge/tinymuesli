@@ -18,6 +18,8 @@ public struct MeetingSuggestions: Codable, Sendable, Equatable {
     public var tags: [String]
     public var speakers: [SpeakerName]
     public var created: Date
+    /// What suggested them. Nil in older files.
+    public var model: ModelInfo? = nil
 
     public static func load(folder: URL) -> MeetingSuggestions? {
         guard let data = try? Data(contentsOf: folder.appendingPathComponent(MeetingFiles.suggestions)) else { return nil }
@@ -89,7 +91,9 @@ public struct MeetingSuggester: Sendable {
         let turns = Self.turns(transcript.messages)
         let labels = turns.isEmpty ? nil : await self.labels(for: turns, log: log)
         let names = await speakerNames(in: turns, log: log)
-        let suggestions = MeetingSuggestions(title: labels?.title, tags: labels?.tags ?? [], speakers: names, created: .now)
+        let suggestions = MeetingSuggestions(title: labels?.title, tags: labels?.tags ?? [], speakers: names, created: .now,
+                                             model: ModelInfo(id: "apple-intelligence", name: "Apple Intelligence",
+                                                              version: ModelInfo.macOS))
         try suggestions.save(to: folder)
         return suggestions
     }

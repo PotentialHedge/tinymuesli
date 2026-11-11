@@ -229,6 +229,10 @@ public struct MeetingMetadata: Sendable, Equatable {
     /// Who shared the meeting, for one added from a shared page (see `SharedMeeting`). Such a
     /// meeting was recorded on someone else's Mac: nobody in it is Me, and it can't be resumed.
     public var sharedBy: String?
+    /// What transcribed it and what told the speakers apart, in short (`ModelInfo.summary`); the
+    /// details are in `transcript.json`'s `processing`.
+    public var transcribedBy: String?
+    public var speakersBy: String?
 
     /// Seconds into the meeting where the audio in `audio/` starts: 0 unless it was resumed.
     public var audioOffset: Double {
@@ -262,6 +266,8 @@ public struct MeetingMetadata: Sendable, Equatable {
         if let app { lines.append("app: \(Self.yamlString(app))") }
         if let sharedBy { lines.append("shared-by: \(Self.yamlString(sharedBy))") }
         if let language { lines.append("language: \(language)") }
+        if let transcribedBy { lines.append("transcribed-by: \(Self.yamlString(transcribedBy))") }
+        if let speakersBy { lines.append("speakers-by: \(Self.yamlString(speakersBy))") }
         if !languageSwitches.isEmpty {
             lines.append("language-switches: [\(languageSwitches.map(\.frontmatterItem).joined(separator: ", "))]")
         }
@@ -294,6 +300,8 @@ public struct MeetingMetadata: Sendable, Equatable {
         sharedBy = values["shared-by"].map(Self.unquote).flatMap { $0.isEmpty ? nil : $0 }
         status = values["status"].flatMap(Status.init(rawValue:)) ?? .recorded
         language = values["language"]
+        transcribedBy = values["transcribed-by"].map(Self.unquote).flatMap { $0.isEmpty ? nil : $0 }
+        speakersBy = values["speakers-by"].map(Self.unquote).flatMap { $0.isEmpty ? nil : $0 }
         languageSwitches = values["language-switches"].map(Self.list)?.compactMap(LanguageSwitch.init(frontmatterItem:)) ?? []
         error = values["error"].map(Self.unquote)
         speakers = values["speakers"].map(Self.list) ?? []

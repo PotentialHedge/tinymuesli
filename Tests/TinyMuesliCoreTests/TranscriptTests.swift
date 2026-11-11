@@ -190,6 +190,7 @@ private struct FakeTranscriber: Transcriber {
     let phrases: [Phrase]
     func inLanguage(_ language: String) -> Transcriber { FakeTranscriber(language: language, phrases: phrases) }
     func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream { FakeStream(phrases: phrases) }
+    var model: ModelInfo? { ModelInfo(id: "fake", name: "Fake", version: "1.0", model: "tiny") }
 }
 
 private final class FakeStream: TranscriptionStream, @unchecked Sendable {
@@ -204,6 +205,7 @@ private struct FakeDiarizer: Diarizer {
     /// What the microphone track hears; one voice by default.
     var mic: Diarization?
     func prepare() async throws {}
+    var model: ModelInfo? { ModelInfo(id: "fake-diarizer", name: "Diarizer") }
     func diarize(file: URL) async throws -> Diarization {
         if fails { throw CocoaError(.fileReadUnknown) }
         if let mic, file.lastPathComponent.hasPrefix("mic") { return mic }
@@ -249,6 +251,23 @@ private struct FakeDiarizer: Diarizer {
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("transcript.json").path))
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("speakers.json").path))
         #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("audio").path))
+    }
+
+    @Test func savesWhatTranscribedItAndToldTheSpeakersApart() async throws {
+        let folder = try makeFolder()
+        let processor = MeetingProcessor(transcriber: FakeTranscriber(phrases: [phrase("hi", at: 1)]),
+                                         diarizer: FakeDiarizer(), keepAudio: true)
+        let result = try await processor.process(folder: folder)
+        #expect(result.document.processing?.transcription?.model == "tiny")
+        #expect(result.document.processing?.diarization?.name == "Diarizer")
+        let saved = try MeetingProcessor.document(in: folder)
+        #expect(saved.processing?.transcription == result.document.processing?.transcription)
+        let md = try String(contentsOf: folder.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(md.contains("transcribed-by: Fake 1.0 (tiny)"))
+        #expect(md.contains("speakers-by: Diarizer"))
+        let metadata = try #require(MeetingMetadata(parsing: md))
+        #expect(metadata.transcribedBy == "Fake 1.0 (tiny)")
+        #expect(MeetingMetadata(parsing: metadata.frontmatter())?.speakersBy == "Diarizer")
     }
 
     /// Two people on the mic: split right away without a meeting app, only offered in a call.

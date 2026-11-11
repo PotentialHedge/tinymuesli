@@ -53,9 +53,25 @@ struct PluginTranscriber: Transcriber {
     let language: String
     /// No language was chosen: the plugin may detect it.
     let detectLanguage: Bool
+    /// The model the plugin said it used (`"model"` in its answer), shared with its other-language copies.
+    let reported: ReportedModel
+
+    init(plugin: Plugin, contribution: PluginManifest.Transcription, language: String, detectLanguage: Bool,
+         reported: ReportedModel = ReportedModel()) {
+        self.plugin = plugin
+        self.contribution = contribution
+        self.language = language
+        self.detectLanguage = detectLanguage
+        self.reported = reported
+    }
 
     func inLanguage(_ language: String) -> Transcriber {
-        PluginTranscriber(plugin: plugin, contribution: contribution, language: language, detectLanguage: false)
+        PluginTranscriber(plugin: plugin, contribution: contribution, language: language, detectLanguage: false,
+                          reported: reported)
+    }
+
+    var model: ModelInfo? {
+        ModelInfo(id: plugin.id, name: plugin.name, version: plugin.manifest.version, model: reported.value)
     }
 
     func makeStream(onPhrase: @escaping @Sendable (Phrase) -> Void) -> TranscriptionStream {
@@ -72,17 +88,69 @@ struct PluginTranscriber: Transcriber {
         return request
     }
 
-    /// One file, one call.
+    /// One file, one call. A plugin's calls run one at a time (see `PluginQueue`).
     func transcribe(upload file: URL) async throws -> [Phrase] {
         var body = request
         body["method"] = "transcribe"
         body["file"] = file.path
-        let output = try await plugin.call(contribution.command, what: "transcribe", request: body)
-        struct Answer: Decodable { var phrases: [PluginPhrase] }
+        await PluginQueue.shared.acquire(plugin.id)
+        let output: Data
         do {
-            return try JSONDecoder().decode(Answer.self, from: output).phrases.map(\.phrase)
+            output = try await plugin.call(contribution.command, what: "transcribe", request: body)
+            await PluginQueue.shared.release(plugin.id)
+        } catch {
+            await PluginQueue.shared.release(plugin.id)
+            throw error
+        }
+        struct Answer: Decodable {
+            var phrases: [PluginPhrase]
+            var model: String?
+        }
+        do {
+            let answer = try JSONDecoder().decode(Answer.self, from: output)
+            if let model = answer.model { reported.value = model }
+            return answer.phrases.map(\.phrase)
         } catch {
             throw PluginError.badOutput(plugin: plugin.name, detail: "\(error)")
+        }
+    }
+}
+
+/// The model a plugin reported, set from whichever track's call answers.
+final class ReportedModel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String?
+    var value: String? {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
+/// Runs a plugin's transcriptions one after another. The final pass transcribes both tracks at once,
+/// and a plugin running a model on this Mac then loads it twice: two Parakeet runs (~6 GB each)
+/// took a 16 GB Mac to a standstill. A cloud plugin only loses a little time.
+actor PluginQueue {
+    static let shared = PluginQueue()
+    private var busy: Set<String> = []
+    private var waiting: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    /// Waits until the plugin is free; call `release` when done.
+    func acquire(_ id: String) async {
+        if busy.contains(id) {
+            await withCheckedContinuation { waiting[id, default: []].append($0) }
+        } else {
+            busy.insert(id)
+        }
+    }
+
+    /// Hands the plugin to the next caller, or frees it.
+    func release(_ id: String) {
+        if var queue = waiting[id], !queue.isEmpty {
+            let first = queue.removeFirst()
+            waiting[id] = queue.isEmpty ? nil : queue
+            first.resume()
+        } else {
+            busy.remove(id)
         }
     }
 }
