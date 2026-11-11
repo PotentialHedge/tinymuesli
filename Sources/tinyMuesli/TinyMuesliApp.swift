@@ -47,12 +47,45 @@ struct TinyMuesliApp: App {
         }
     }
 
-    /// `tinymuesli://meeting?id=…`: selects that meeting, if there is one.
+    /// `tinymuesli://meeting?id=…`: selects that meeting, if there is one. `tinymuesli://import?data=…`
+    /// (from a shared meeting's page) offers to add the meeting it carries.
     private func openMeetingLink(_ url: URL) {
         NSApp.activate()
+        if SharedMeeting.isImportLink(url) { return importSharedMeeting(url) }
         guard let id = MeetingLink.id(from: url), let folder = MeetingLibrary(store: model.store).folder(id: id) else { return }
         browser.select(folder)
         browser.reload(store: model.store)
+    }
+
+    /// Asks first, since any web page can open the link. A meeting added before is just shown.
+    private func importSharedMeeting(_ url: URL) {
+        let alert = NSAlert()
+        do {
+            let shared = try SharedMeeting(importURL: url)
+            let store = model.store
+            if let folder = shared.existing(in: store) {
+                browser.select(folder)
+                browser.reload(store: store)
+                return
+            }
+            var facts = [shared.transcript.start.formatted(date: .abbreviated, time: .shortened)]
+            if let end = shared.transcript.end { facts.append(SharedMeeting.length(end.timeIntervalSince(shared.transcript.start))) }
+            facts.append(shared.speakers.count == 1 ? "1 person" : "\(shared.speakers.count) people")
+            alert.messageText = "Add “\(shared.name)” to Your Meetings?"
+            alert.informativeText = "\(shared.sharedBy) shared this meeting (\(facts.joined(separator: ", "))). "
+                + "Its transcript goes in your meetings folder with your own meetings, so you can search it, name people "
+                + "and ask your assistant about it."
+            alert.addButton(withTitle: "Add Meeting")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let folder = try shared.add(to: store).folder
+            browser.select(folder)
+            browser.reload(store: store)
+        } catch {
+            alert.messageText = "Couldn't Add the Meeting"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     /// Flags missing permissions while nothing else is going on.

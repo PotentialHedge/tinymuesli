@@ -382,6 +382,11 @@ struct MeetingsWindow: View {
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([entry.folder])
         }
+        if entry.status == .done {
+            Divider()
+            ShareLink(item: SharedMeetingPage(folder: entry.folder), preview: SharePreview(SharedMeetingPage.title(of: entry.folder)))
+            Button("Save as Web Page…") { SharedMeetingPage(folder: entry.folder).save() }
+        }
         Divider()
         Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
     }
@@ -937,6 +942,14 @@ private struct ChatView: View {
                         }
                     }
                     .help("Chat about this meeting in \(service.name), which reads it through tinyMuesli")
+                }
+            }
+            if transcript.metadata?.status == .done {
+                ToolbarItem {
+                    ShareLink(item: SharedMeetingPage(folder: folder), preview: SharePreview(SharedMeetingPage.title(of: folder))) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                    .help("Share this meeting as a web page, which anyone with tinyMuesli can add to their meetings")
                 }
             }
             ToolbarItem {

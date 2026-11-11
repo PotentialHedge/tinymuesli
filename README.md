@@ -88,6 +88,20 @@ give it: `--title ""` removes the title, `--tags ""` removes the tags, and `--sp
 Meetings window, launching tinyMuesli if it isn't running. The [Raycast extension](raycast/) uses
 both.
 
+## Sharing a meeting
+
+**Share** in the Meetings window's toolbar (or right-click a meeting: Share, Save as Web Page…)
+sends a finished meeting as a single web page. It shows the transcript as a chat and opens in any
+browser, so the recipient doesn't need tinyMuesli. If they have it, **Add to tinyMuesli** on the page
+adds the meeting to their meetings, after asking. The meeting travels inside the page's link, so
+nothing is uploaded anywhere. The page holds only the transcript: title, tags, times and who said
+what. Audio and voice prints stay on your Mac. "Me" is shown as your macOS account's full name.
+
+```sh
+tinymuesli share "<meeting id>" --output roadmap.html   # --name "Ben" to choose the name for Me
+tinymuesli import roadmap.html                           # or a tinymuesli://import link
+```
+
 `transcribe` re-runs the final pass on a folder that still has its `audio/` (e.g. one recorded
 with audio retention on, or one whose transcription failed).
 

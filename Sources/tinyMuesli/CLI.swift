@@ -20,6 +20,8 @@ enum CLI {
         case "speakers": return speakers(Array(args.dropFirst()))
         case "update": return update(Array(args.dropFirst()))
         case "suggest": return suggest(Array(args.dropFirst()))
+        case "share": return share(Array(args.dropFirst()))
+        case "import": return importShared(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
         case "help", "--help", "-h":
             print(usage)
@@ -53,9 +55,13 @@ enum CLI {
                  [--speaker OLD=NEW]  Renames a speaker; repeat for more. Two the same name are merged
           suggest MEETING           Ask Apple Intelligence for a title, tags and speaker names (saved
                                     as suggestions.json; nothing is changed until you update)
+          share MEETING             Save a finished meeting as a web page to send: it shows the transcript, and
+                 [--output FILE]    anyone with tinyMuesli can add the meeting from it ("Me" becomes your name)
+                 [--name NAME]      The name for "Me" (default: your macOS account's full name)
+          import PAGE               Add a meeting from a page made by share (or a tinymuesli://import link)
           mcp                       Run the MCP server on stdin/stdout
 
-          list, show, search, speakers, update and suggest also take --json. All but record's options and
+          list, show, search, speakers, update, suggest and import also take --json. All but record's options and
           mcp also take --root DIR.
         """
 
@@ -380,6 +386,58 @@ enum CLI {
             print("\(speaker.speaker)\tmaybe \(speaker.name)\t“\(speaker.quote)”")
         }
         return 0
+    }
+
+    private static func share(_ args: [String]) -> Int32 {
+        var output: String?
+        var name = NSFullUserName()
+        var rest: [String] = []
+        var i = 0
+        while i < args.count {
+            switch args[i] {
+            case "--output" where i + 1 < args.count:
+                output = args[i + 1]
+                i += 2
+            case "--name" where i + 1 < args.count:
+                name = args[i + 1]
+                i += 2
+            default:
+                rest.append(args[i])
+                i += 1
+            }
+        }
+        guard let options = LibraryOptions(rest), options.positional.count == 1, options.limit == nil, !options.json else { return usageError() }
+        guard let folder = MeetingLibrary(store: options.store).folder(id: options.positional[0]) else {
+            return fail("error: no meeting \"\(options.positional[0])\" (see tinymuesli list)")
+        }
+        do {
+            let shared = try SharedMeeting(folder: folder, sharedBy: name)
+            let url = URL(fileURLWithPath: output ?? shared.fileName)
+            try shared.html().write(to: url, atomically: true, encoding: .utf8)
+            print(url.path)
+            return 0
+        } catch {
+            return fail("error: \(error.localizedDescription)")
+        }
+    }
+
+    private static func importShared(_ args: [String]) -> Int32 {
+        guard let options = LibraryOptions(args), options.positional.count == 1, options.limit == nil else { return usageError() }
+        let source = options.positional[0]
+        do {
+            let shared = if let url = URL(string: source), SharedMeeting.isImportLink(url) {
+                try SharedMeeting(importURL: url)
+            } else {
+                try SharedMeeting(html: String(contentsOfFile: source, encoding: .utf8))
+            }
+            let result = try shared.add(to: options.store)
+            let library = MeetingLibrary(store: options.store)
+            if options.json, let summary = library.summary(of: result.folder) { return printJSON(summary) }
+            print("\(result.added ? "added" : "already there")\t\(library.id(of: result.folder))")
+            return 0
+        } catch {
+            return fail("error: \(error.localizedDescription)")
+        }
     }
 
     private static func mcp(_ args: [String]) -> Int32 {
