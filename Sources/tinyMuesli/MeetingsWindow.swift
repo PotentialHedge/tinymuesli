@@ -386,6 +386,13 @@ struct MeetingsWindow: View {
             Divider()
             Button("Share…") { MeetingSharer.shared.shareAtPointer(folder: entry.folder) }
             Button("Save as Web Page…") { WebPageExport.save(folder: entry.folder) }
+            let actions = model.pluginActions
+            if !actions.isEmpty {
+                Divider()
+                ForEach(actions) { action in
+                    Button(action.title) { model.run(action, on: entry.folder) }
+                }
+            }
         }
         Divider()
         Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }

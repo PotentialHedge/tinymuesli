@@ -1,7 +1,7 @@
 import Foundation
 
 /// A model that suggests a finished meeting's title, tags and speaker names (`suggestions.json`).
-/// Apple Intelligence today; another model (local or cloud) conforms and is listed in `all`.
+/// Apple Intelligence, or a plugin's (`PluginSuggestionProvider`).
 public protocol SuggestionProvider: Sendable {
     var id: String { get }
     var name: String { get }
@@ -16,8 +16,14 @@ public protocol SuggestionProvider: Sendable {
 
 public enum SuggestionProviders {
     public static let apple = AppleIntelligenceSuggestions()
-    public static let all: [any SuggestionProvider] = [apple]
-    public static var selected: any SuggestionProvider { apple }
+    public static func all(plugins: [Plugin] = PluginStore().installed()) -> [any SuggestionProvider] {
+        [apple] + plugins.compactMap(PluginSuggestionProvider.init(plugin:))
+    }
+
+    /// The one chosen in Settings, else Apple Intelligence.
+    public static var selected: any SuggestionProvider {
+        all().first { $0.id == Settings.suggestionProvider } ?? apple
+    }
 }
 
 /// Apple's on-device model, through `MeetingSuggester`.

@@ -1,9 +1,7 @@
 import Foundation
 
-/// A speech-to-text backend: Apple's on-device `SpeechAnalyzer`, or a cloud service like ElevenLabs.
-///
-/// Providers are compiled in (no dynamic loading); adding one means adding a type that conforms and
-/// listing it in `TranscriptionProviders.all`. Everything downstream only sees `Transcriber`.
+/// A speech-to-text backend: Apple's on-device `SpeechAnalyzer`, or a plugin's
+/// (`PluginTranscriptionProvider`, e.g. a cloud service). Everything downstream only sees `Transcriber`.
 public protocol TranscriptionProvider: Sendable {
     /// Stable id, saved in settings and taken by the CLI's `--provider`, e.g. "apple".
     var id: String { get }
@@ -24,15 +22,17 @@ public protocol TranscriptionProvider: Sendable {
 
 public enum TranscriptionProviders {
     public static let apple = AppleSpeechProvider()
-    public static let elevenLabs = ElevenLabsProvider()
 
-    public static let all: [any TranscriptionProvider] = [apple, elevenLabs]
-
-    public static func provider(id: String) -> (any TranscriptionProvider)? {
-        all.first { $0.id == id }
+    /// Apple's, then each installed plugin's.
+    public static func all(plugins: [Plugin] = PluginStore().installed()) -> [any TranscriptionProvider] {
+        [apple] + plugins.compactMap(PluginTranscriptionProvider.init(plugin:))
     }
 
-    /// The one chosen in Settings, else Apple's.
+    public static func provider(id: String, plugins: [Plugin] = PluginStore().installed()) -> (any TranscriptionProvider)? {
+        all(plugins: plugins).first { $0.id == id }
+    }
+
+    /// The one chosen in Settings, else Apple's (also when the chosen plugin was removed).
     public static var selected: any TranscriptionProvider {
         provider(id: Settings.transcriptionProvider) ?? apple
     }

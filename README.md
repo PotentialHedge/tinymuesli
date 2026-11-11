@@ -141,6 +141,28 @@ It also gets `TINYMUESLI_MEETING_DIR`, `TINYMUESLI_TRANSCRIPT_MD` and
 `TINYMUESLI_TRANSCRIPT_JSON`. Apps get a minimal `PATH`, so use absolute paths in the script. Output goes to
 `~/Library/Logs/tinyMuesli/on-meeting-end.log`.
 
+Or let Claude Code do it: turn on **Ask Claude Code** in Settings › Assistants › After Each Meeting and
+write what it should do. It runs `claude -p` with your prompt and tinyMuesli's MCP server, using your
+own Claude Code login and settings.
+
+## Plugins
+
+Plugins add transcription providers, title suggestions, things to run after each meeting, items in a
+meeting's menu, and their own settings. Find and install them in Settings › Plugins, or:
+
+```sh
+tinymuesli plugin search
+tinymuesli plugin install PotentialHedge/tinymuesli-elevenlabs   # ElevenLabs Scribe transcription
+tinymuesli plugin config elevenlabs apiKey YOUR_KEY
+```
+
+Before installing, tinyMuesli shows what a plugin can read, whether it uses the internet and exactly what it
+runs. A plugin is a program that runs as you, so only install ones from people you trust. Plugin settings
+are in `~/.config/tinymuesli/settings.json` (API keys are in your keychain).
+
+To write one, see [docs/plugins.md](docs/plugins.md): a `tinymuesli-plugin.json` and a program in any language,
+in a GitHub repository with the topic `tinymuesli-plugin`.
+
 ## Updates
 
 The app updates itself through [Sparkle](https://sparkle-project.org): "Check for Updates…" in the

@@ -3,8 +3,8 @@ import Foundation
 /// Something that runs after a meeting's final pass: the user's shell hook, or an AI agent like
 /// Claude Code that reads the meeting through tinyMuesli's MCP server and acts on it.
 ///
-/// Agents are compiled in and listed in `MeetingAgents.all`; the hook always runs if it's installed,
-/// the others when they're turned on in Settings › Assistants.
+/// The hook always runs if it's installed; Claude Code and plugins' agents (`PluginAgent`) when they're
+/// turned on in Settings.
 public protocol MeetingAgent: Sendable {
     /// Stable id, saved in settings, e.g. "claude-code".
     var id: String { get }
@@ -26,8 +26,10 @@ public enum AgentOutcome: Sendable, Equatable {
 
 public enum MeetingAgents {
     /// The agents that can be turned on in Settings (the hook needs no switch: installing it is the switch).
-    public static func optional(binaryPath: String) -> [any MeetingAgent] {
-        [ClaudeCodeAgent(binaryPath: binaryPath, prompt: Settings.claudeCodePrompt)]
+    public static func optional(binaryPath: String, plugins: [Plugin] = PluginStore().installed(),
+                                store: MeetingStore = MeetingStore()) -> [any MeetingAgent] {
+        [ClaudeCodeAgent(binaryPath: binaryPath, prompt: Settings.claudeCodePrompt, store: store)]
+            + plugins.compactMap { PluginAgent(plugin: $0, store: store) }
     }
 
     /// What runs after a final pass: the hook, then each agent turned on.

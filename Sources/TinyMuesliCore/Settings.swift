@@ -80,6 +80,12 @@ public enum Settings {
         set { defaults.set(newValue, forKey: "transcriptionProvider") }
     }
 
+    /// Id of the `SuggestionProvider` to use. Default: Apple Intelligence.
+    public static var suggestionProvider: String {
+        get { defaults.string(forKey: "suggestionProvider") ?? SuggestionProviders.apple.id }
+        set { defaults.set(newValue, forKey: "suggestionProvider") }
+    }
+
     /// Ids of the `MeetingAgent`s that run after each meeting (besides the hook). None by default.
     public static var enabledAgents: Set<String> {
         get { Set(defaults.stringArray(forKey: "enabledAgents") ?? []) }

@@ -21,6 +21,9 @@ struct SettingsView: View {
             Tab("Assistants", systemImage: "bubble.left.and.text.bubble.right") {
                 AssistantSettings(model: model)
             }
+            Tab("Plugins", systemImage: "puzzlepiece.extension") {
+                PluginSettingsView(model: model)
+            }
             Tab("Permissions", systemImage: "lock.shield") {
                 PermissionSettings(permissions: permissions, onboarding: onboarding)
             }
@@ -174,47 +177,33 @@ private struct RecordingSettings: View {
     }
 }
 
-/// Which engine transcribes, and its API key if it's a cloud one.
+/// Which engine transcribes: Apple's, or an installed plugin's.
 private struct TranscriptionSettings: View {
     let model: AppModel
-    @State private var key = ""
-    @State private var hasKey = APIKeys.key(for: .elevenLabs) != nil
 
     var body: some View {
         @Bindable var model = model
+        let provider = model.transcriptionProvider
         Section {
             Picker("Transcription", selection: $model.transcriptionProviderID) {
-                ForEach(TranscriptionProviders.all, id: \.id) { provider in
+                ForEach(model.transcriptionProviders, id: \.id) { provider in
                     Text(provider.name).tag(provider.id)
                 }
             }
-            if model.transcriptionProviderID == TranscriptionProviders.elevenLabs.id {
-                LabeledContent {
-                    if hasKey {
-                        Button("Remove") {
-                            APIKeys.set(nil, for: .elevenLabs)
-                            hasKey = APIKeys.key(for: .elevenLabs) != nil
-                        }
-                    } else {
-                        HStack {
-                            SecureField("API Key", text: $key).labelsHidden().frame(width: 180)
-                            Button("Save") {
-                                APIKeys.set(key, for: .elevenLabs)
-                                key = ""
-                                hasKey = APIKeys.key(for: .elevenLabs) != nil
-                            }
-                            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
-                        }
+            if let problem = provider.setupProblem {
+                Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            }
+            if model.suggestionProviders.count > 1 {
+                Picker("Suggestions", selection: $model.suggestionProviderID) {
+                    ForEach(model.suggestionProviders, id: \.id) { provider in
+                        Text(provider.name).tag(provider.id)
                     }
-                } label: {
-                    Text("ElevenLabs API Key")
-                    Text(hasKey ? "Saved in your keychain." : "From elevenlabs.io › Developers › API Keys. Kept in your keychain.")
                 }
             }
         } footer: {
-            Text(model.transcriptionProvider.isOnDevice
-                 ? "Transcription runs on this Mac."
-                 : "Each meeting's audio is uploaded to \(model.transcriptionProvider.name) after it ends, and the transcript appears then. Speakers are still told apart on this Mac.")
+            Text(provider.isOnDevice
+                 ? "Transcription runs on this Mac. Plugins (Settings › Plugins) can add other providers."
+                 : "Each meeting's audio goes to \(provider.name), a plugin, which says it uses the internet. Speakers are still told apart on this Mac.")
                 .settingsFooter()
         }
     }
@@ -440,7 +429,7 @@ private struct PermissionSettings: View {
     }
 }
 
-private extension Text {
+extension Text {
     func settingsFooter() -> some View {
         font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
     }

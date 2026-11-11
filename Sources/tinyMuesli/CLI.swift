@@ -5,7 +5,7 @@ import TinyMuesliCore
 /// it onto the PATH), else `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
-    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "run-agents", "providers", "mcp", "help", "--help", "-h"]
+    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "run-agents", "providers", "plugin", "mcp", "help", "--help", "-h"]
 
     static func run(_ args: [String]) -> Int32 {
         switch args.first {
@@ -22,6 +22,7 @@ enum CLI {
         case "suggest": return suggest(Array(args.dropFirst()))
         case "run-agents": return runAgents(Array(args.dropFirst()))
         case "providers": return providers()
+        case "plugin": return plugin(Array(args.dropFirst()))
         case "share": return share(Array(args.dropFirst()))
         case "import": return importShared(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
@@ -66,6 +67,14 @@ enum CLI {
                  [--email]          Write the HTML body of an email instead (what Share › Mail writes)
           run-agents MEETING        Run the on-meeting-end hook and the agents turned on in Settings for a meeting
                  [--agent ID]       Just this agent (e.g. claude-code), whether it's turned on or not
+          plugin list               Installed plugins, what they add and their settings
+          plugin search [QUERY]     Plugins on GitHub (repositories with the topic tinymuesli-plugin)
+          plugin install SOURCE     Install from owner/repo[@ref], a GitHub link, or a folder (linked, for
+                 [--yes]            developing one). Shows what it can do and asks first, unless --yes
+          plugin update ID [--yes]  Install the newest commit of a plugin from GitHub
+          plugin remove ID          Remove a plugin (and its secrets from the keychain)
+          plugin config ID [KEY [VALUE]]  Show a plugin's settings, or set one ("" resets it)
+          plugin run ID ACTION MEETING    Run a plugin's meeting-menu item
           import PAGE               Add a meeting from a page made by share (or a tinymuesli://import link)
           mcp                       Run the MCP server on stdin/stdout
 
@@ -468,12 +477,12 @@ enum CLI {
     private static func providers() -> Int32 {
         let selected = TranscriptionProviders.selected.id
         print("Transcription:")
-        for provider in TranscriptionProviders.all {
+        for provider in TranscriptionProviders.all() {
             let state = provider.setupProblem ?? (provider.isOnDevice ? "on this Mac" : "cloud")
             print("  \(provider.id == selected ? "*" : " ") \(provider.id)\t\(provider.name)\t\(state)")
         }
         print("Suggestions:")
-        for provider in SuggestionProviders.all {
+        for provider in SuggestionProviders.all() {
             print("  \(provider.id == SuggestionProviders.selected.id ? "*" : " ") \(provider.id)\t\(provider.name)\t\(provider.isAvailable ? "ready" : "not available")")
         }
         print("After each meeting:")
@@ -518,6 +527,155 @@ enum CLI {
             }
         }
         return failed ? 1 : 0
+    }
+
+    // MARK: - Plugins
+
+    private static func plugin(_ args: [String]) -> Int32 {
+        let store = PluginStore()
+        var rest = Array(args.dropFirst())
+        let yes = rest.contains("--yes")
+        rest.removeAll { $0 == "--yes" }
+        switch (args.first, rest.count) {
+        case ("list", 0):
+            let plugins = store.installed()
+            if plugins.isEmpty { print("No plugins installed. Find some with: tinymuesli plugin search") }
+            for plugin in plugins { printPlugin(plugin) }
+            for (folder, problem) in store.problems() { print("! \(folder.lastPathComponent): \(problem)") }
+            return 0
+        case ("search", 0...):
+            let query = rest.joined(separator: " ")
+            do {
+                let listings = try wait { try await store.search(query) }
+                if listings.isEmpty { print("No plugins found.") }
+                for listing in listings {
+                    print("\(listing.id)\t★\(listing.stars)\t\(listing.description ?? "")")
+                }
+                return 0
+            } catch {
+                return fail("error: \(error.localizedDescription)")
+            }
+        case ("install", 1), ("update", 1):
+            let source: PluginStore.Source?
+            if args.first == "update" {
+                guard let plugin = store.plugin(id: rest[0]) else { return fail("error: no plugin \"\(rest[0])\"") }
+                guard let repository = plugin.install?.githubRepository else { return fail("error: \(plugin.name) wasn't installed from GitHub") }
+                source = PluginStore.Source(repository)
+            } else {
+                source = PluginStore.Source(rest[0])
+            }
+            guard let source else { return fail("error: \"\(rest[0])\" isn't owner/repo, a GitHub link or a folder") }
+            do {
+                let candidate = try wait { try await store.candidate(source) }
+                if args.first == "update", candidate.commit == candidate.replaces?.install?.commit {
+                    print("\(candidate.manifest.name) is up to date.")
+                    return 0
+                }
+                printConsent(candidate)
+                if !yes {
+                    print("\n\(candidate.replaces == nil ? "Install" : "Update")? [y/N] ", terminator: "")
+                    guard let answer = readLine(), ["y", "yes"].contains(answer.lowercased()) else { return 1 }
+                }
+                let plugin = try wait { try await store.install(candidate) }
+                if plugin.manifest.contributes.agent != nil { Settings.enabledAgents.insert(plugin.id) }
+                print("Installed \(plugin.name) in \(plugin.directory.path)")
+                if plugin.manifest.contributes.transcription != nil {
+                    print("Use it with: tinymuesli transcribe FOLDER --provider \(plugin.id), or choose it in Settings › Recording.")
+                }
+                return 0
+            } catch {
+                return fail("error: \(error.localizedDescription)")
+            }
+        case ("remove", 1):
+            guard let plugin = store.plugin(id: rest[0]) else { return fail("error: no plugin \"\(rest[0])\"") }
+            do {
+                try store.remove(plugin)
+                Settings.enabledAgents.remove(plugin.id)
+                print("Removed \(plugin.name).")
+                return 0
+            } catch {
+                return fail("error: \(error.localizedDescription)")
+            }
+        case ("config", 1...3):
+            guard let plugin = store.plugin(id: rest[0]) else { return fail("error: no plugin \"\(rest[0])\"") }
+            let settings = PluginSettings()
+            let declared = plugin.manifest.settings
+            if rest.count == 1 {
+                if declared.isEmpty { print("\(plugin.name) has no settings.") }
+                for (key, property) in declared {
+                    let value = settings.value(key, property)
+                    let shown = property.secret == true ? (value == nil ? "(not set)" : "(saved in keychain)") : value?.display ?? "(not set)"
+                    print("\(key) = \(shown)\t\(property.type.rawValue)\(property.enum.map { " [\($0.map(\.display).joined(separator: ", "))]" } ?? "")\t\(property.help ?? "")")
+                }
+                return 0
+            }
+            let key = rest[1].contains(".") ? rest[1] : "\(plugin.id).\(rest[1])"
+            guard let property = plugin.manifest.contributes.configuration?.properties[key] else {
+                return fail("error: \(plugin.name) has no setting \(key)")
+            }
+            if rest.count == 2 {
+                let value = settings.value(key, property)
+                print(property.secret == true ? (value == nil ? "" : "(saved in keychain)") : value?.display ?? "")
+                return 0
+            }
+            if property.secret == true, rest[2].isEmpty == false {
+                settings.setSecret(key, rest[2])
+                return 0
+            }
+            let value = rest[2].isEmpty ? nil : PluginSettings.parse(rest[2], for: property)
+            if !rest[2].isEmpty, value == nil {
+                return fail("error: \(key) takes a \(property.type.rawValue)\(property.enum.map { ": one of \($0.map(\.display).joined(separator: ", "))" } ?? "")")
+            }
+            do { try settings.set(key, value, property: property) } catch { return fail("error: \(error.localizedDescription)") }
+            return 0
+        case ("run", 3):
+            guard let plugin = store.plugin(id: rest[0]) else { return fail("error: no plugin \"\(rest[0])\"") }
+            guard let action = plugin.manifest.contributes.actions?.first(where: { $0.id == rest[1] }) else {
+                return fail("error: \(plugin.name) has no action \"\(rest[1])\"")
+            }
+            let meetings = MeetingStore()
+            guard let folder = MeetingLibrary(store: meetings).folder(id: rest[2]) else {
+                return fail("error: no meeting \"\(rest[2])\" (see tinymuesli list)")
+            }
+            do {
+                let result = try wait { try await PluginAction(plugin: plugin, action: action).run(folder: folder, store: meetings) }
+                if let message = result.message { print(message) }
+                if let url = result.open { print(url.absoluteString) }
+                return 0
+            } catch {
+                return fail("error: \(error.localizedDescription)")
+            }
+        default:
+            return usageError()
+        }
+    }
+
+    private static func printPlugin(_ plugin: Plugin) {
+        let manifest = plugin.manifest
+        print("\(manifest.id)\t\(manifest.name) \(manifest.version ?? "")")
+        if let install = plugin.install {
+            print("  from: \(install.githubRepository.map { "\($0) @ \(install.commit?.prefix(7) ?? "")" } ?? plugin.directory.path)")
+        }
+        let c = manifest.contributes
+        if let t = c.transcription { print("  transcription\(t.live == true ? " (live)" : "")") }
+        if c.suggestions != nil { print("  suggestions") }
+        if c.agent != nil { print("  after each meeting: \(Settings.enabledAgents.contains(plugin.id) ? "on" : "off")") }
+        for action in c.actions ?? [] { print("  action \(action.id): \(action.title)") }
+        if !manifest.settings.isEmpty { print("  settings: \(manifest.settings.map(\.key).joined(separator: ", "))") }
+    }
+
+    private static func printConsent(_ candidate: PluginStore.Candidate) {
+        let manifest = candidate.manifest
+        print("\(manifest.name) \(manifest.version ?? "") (\(manifest.id))")
+        if let description = manifest.description { print(description) }
+        print("From: \(candidate.commitURL?.absoluteString ?? candidate.source.description)")
+        print("It runs:")
+        for item in manifest.commands { print("  \(item.what): \(item.command.joined(separator: " "))") }
+        if manifest.network == true { print("It says it uses the internet.") }
+        if !candidate.missingPrograms.isEmpty {
+            print("warning: needs \(candidate.missingPrograms.joined(separator: ", ")), which isn't installed")
+        }
+        print("A plugin runs as you and can do anything your account can. Only install plugins you trust.")
     }
 
     private static func mcp(_ args: [String]) -> Int32 {

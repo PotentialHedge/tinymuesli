@@ -62,7 +62,73 @@ final class AppModel {
         }
     }
     var transcriptionProvider: any TranscriptionProvider {
-        TranscriptionProviders.provider(id: transcriptionProviderID) ?? TranscriptionProviders.apple
+        TranscriptionProviders.provider(id: transcriptionProviderID, plugins: plugins) ?? TranscriptionProviders.apple
+    }
+    var transcriptionProviders: [any TranscriptionProvider] { TranscriptionProviders.all(plugins: plugins) }
+    /// Id of the `SuggestionProvider` in use.
+    var suggestionProviderID = Settings.suggestionProvider {
+        didSet {
+            Settings.suggestionProvider = suggestionProviderID
+            suggestForEarlierMeetings()
+        }
+    }
+    var suggestionProviders: [any SuggestionProvider] { SuggestionProviders.all(plugins: plugins) }
+
+    // MARK: Plugins
+
+    let pluginStore = PluginStore()
+    /// Installed plugins (see `PluginStore`); reloaded after installing or removing one.
+    private(set) var plugins: [Plugin] = PluginStore().installed()
+    /// Menu items plugins add to finished meetings.
+    var pluginActions: [PluginAction] {
+        plugins.flatMap { plugin in (plugin.manifest.contributes.actions ?? []).map { PluginAction(plugin: plugin, action: $0) } }
+    }
+
+    func reloadPlugins() {
+        plugins = pluginStore.installed()
+        Task { languages = await transcriptionProvider.offeredLanguages() }
+    }
+
+    func install(_ candidate: PluginStore.Candidate) async throws {
+        let plugin = try await pluginStore.install(candidate)
+        reloadPlugins()
+        // Something it adds that only runs once chosen: say where.
+        if plugin.manifest.contributes.agent != nil { enabledAgents.insert(plugin.id) }
+    }
+
+    func remove(_ plugin: Plugin) {
+        do {
+            try pluginStore.remove(plugin)
+        } catch {
+            lastError = "Couldn't remove \(plugin.name): \(error.localizedDescription)"
+        }
+        enabledAgents.remove(plugin.id)
+        reloadPlugins()
+    }
+
+    /// Runs a plugin's menu item on a meeting, then shows what it says (and opens its link).
+    func run(_ action: PluginAction, on folder: URL) {
+        let store = store
+        Task {
+            do {
+                let result = try await action.run(folder: folder, store: store)
+                if let url = result.open, ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") || url.isFileURL {
+                    NSWorkspace.shared.open(url)
+                }
+                if let message = result.message {
+                    let alert = NSAlert()
+                    alert.messageText = action.title
+                    alert.informativeText = message
+                    alert.runModal()
+                }
+            } catch {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "\(action.title) didn't work"
+                alert.informativeText = error.localizedDescription
+                alert.runModal()
+            }
+        }
     }
     /// Ids of the meeting-end agents turned on (see `MeetingAgents`).
     var enabledAgents = Settings.enabledAgents {
