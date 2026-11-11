@@ -42,6 +42,13 @@ public enum Settings {
         set { defaults.set(newValue?.identifier(.bcp47), forKey: "language") }
     }
 
+    /// Languages spoken in the user's meetings (BCP-47 tags, the variant they speak, e.g. "de-CH"),
+    /// chosen in onboarding or Settings › Recording. Empty = not asked yet: macOS's languages stand in.
+    public static var spokenLanguages: [String] {
+        get { defaults.stringArray(forKey: "spokenLanguages") ?? [] }
+        set { defaults.set(newValue.isEmpty ? nil : newValue, forKey: "spokenLanguages") }
+    }
+
     /// Keep `audio/` after a successful transcription. Off by default: transcript only.
     public static var keepAudio: Bool {
         get { defaults.bool(forKey: "keepAudio") }

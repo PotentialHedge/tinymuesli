@@ -3,7 +3,7 @@ import SwiftUI
 import TinyMuesliCore
 
 /// The welcome window: how tinyMuesli works, the permissions it needs, which apps to record
-/// without asking, Apple Intelligence (on Macs that have it), and the AI apps and Raycast it works with. Shows on first launch, and at the permissions page on every launch until they're all allowed;
+/// without asking, the languages spoken in your meetings, Apple Intelligence (on Macs that have it), and the AI apps and Raycast it works with. Shows on first launch, and at the permissions page on every launch until they're all allowed;
 /// "Show Welcome Guide…" in Settings › Permissions opens it again.
 ///
 /// It opens in the middle of the screen. While macOS asks for a permission, it moves so that the
@@ -194,7 +194,7 @@ final class Onboarding: NSObject, NSWindowDelegate {
 @Observable
 final class OnboardingState {
     enum Step: Int, CaseIterable {
-        case welcome, permissions, apps, intelligence, agents, ready
+        case welcome, permissions, apps, languages, intelligence, agents, ready
     }
 
     /// The pages this Mac gets: Apple Intelligence only where it's supported (Apple silicon).
@@ -259,6 +259,7 @@ private struct OnboardingView: View {
         case .welcome: WelcomePage(meetingsFolder: model.meetingsFolderName)
         case .permissions: PermissionsPage(permissions: permissions, allow: allow, bringToFront: bringToFront)
         case .apps: AppsPage(model: model)
+        case .languages: LanguagesPage(model: model)
         case .intelligence: IntelligencePage()
         case .agents: AgentsPage(model: model)
         case .ready: ReadyPage(model: model)
@@ -309,7 +310,7 @@ private struct OnboardingView: View {
     private var nextTitle: String {
         switch state.step {
         case .welcome: "Get Started"
-        case .permissions, .apps, .intelligence, .agents: "Continue"
+        case .permissions, .apps, .languages, .intelligence, .agents: "Continue"
         case .ready: "Done"
         }
     }
@@ -324,7 +325,7 @@ private struct OnboardingView: View {
 // MARK: - Pages
 
 /// Big symbol, title and subtitle at the top of each page.
-private struct PageHeader: View {
+struct PageHeader: View {
     var symbol: String?
     let title: String
     let subtitle: String
@@ -357,7 +358,7 @@ private struct PageHeader: View {
     }
 }
 
-private struct Card<Content: View>: View {
+struct Card<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {

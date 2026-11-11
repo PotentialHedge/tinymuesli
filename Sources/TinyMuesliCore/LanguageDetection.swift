@@ -140,20 +140,25 @@ public enum LanguageDetector {
     static let agreeingMargin = 0.04
     static let minimumScore = 0.6
 
-    /// Languages worth trying, most likely first: what the recogniser reads in `text`, then your
-    /// macOS languages (Language & Region). Not `current`'s language, and only ones on `offered`.
+    /// Languages worth trying, most likely first: what the recogniser reads in `text`, then the
+    /// languages you speak in meetings (`spoken`), or your macOS languages (Language & Region) if you
+    /// haven't said. Once you have, only those. Not `current`'s language, and only ones on `offered`.
     public static func candidates(
         text: String,
         current: String,
         offered: [Locale],
+        spoken: [String] = Settings.spokenLanguages,
         preferred: [String] = Locale.preferredLanguages,
         identify: (String) -> [String: Double] = LanguageMonitor.identify,
         limit: Int = 3
     ) -> [String] {
         let currentCode = LanguageMonitor.code(current)
+        let preferred = spoken.isEmpty ? preferred : spoken
+        let allowed = Set(spoken.map(LanguageMonitor.code))
         let guessed = identify(text).filter { $0.value >= 0.2 }.sorted { $0.value > $1.value }.map(\.key)
         var codes: [String] = []
-        for code in (guessed + preferred).map(LanguageMonitor.code) where code != currentCode && !codes.contains(code) {
+        for code in (guessed + preferred).map(LanguageMonitor.code)
+        where code != currentCode && !codes.contains(code) && (allowed.isEmpty || allowed.contains(code)) {
             codes.append(code)
         }
 

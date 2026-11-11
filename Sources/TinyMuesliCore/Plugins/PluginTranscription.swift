@@ -25,6 +25,7 @@ public struct PluginTranscriptionProvider: TranscriptionProvider {
     public var name: String { plugin.name }
     public var isOnDevice: Bool { plugin.manifest.network != true }
     public var transcribesLive: Bool { contribution.live ?? false }
+    public var isMultilingual: Bool { contribution.multilingual ?? false }
 
     public var setupProblem: String? {
         let settings = PluginSettings()
@@ -32,7 +33,7 @@ public struct PluginTranscriptionProvider: TranscriptionProvider {
         return missing.isEmpty ? nil : "Needs \(missing.map(\.key).joined(separator: ", ")) (Settings › Plugins)."
     }
 
-    static let defaultLanguages = ["da-DK", "de-DE", "en-GB", "en-US", "es-ES", "fi-FI", "fr-FR", "it-IT", "nb-NO",
+    public static let defaultLanguages = ["da-DK", "de-DE", "en-GB", "en-US", "es-ES", "fi-FI", "fr-FR", "it-IT", "nb-NO",
                                    "nl-NL", "pl-PL", "pt-BR", "pt-PT", "sv-SE", "zh-CN"]
 
     public func offeredLanguages() async -> [Locale] {
@@ -64,7 +65,11 @@ struct PluginTranscriber: Transcriber {
     }
 
     var request: [String: Any] {
-        ["language": language, "detectLanguage": detectLanguage]
+        var request: [String: Any] = ["language": language, "detectLanguage": detectLanguage]
+        // A hint for detecting: the languages the user said are spoken in their meetings.
+        let spoken = Settings.spokenLanguages
+        if !spoken.isEmpty { request["languages"] = spoken }
+        return request
     }
 
     /// One file, one call.

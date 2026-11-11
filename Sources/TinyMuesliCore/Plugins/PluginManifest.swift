@@ -54,6 +54,9 @@ public struct PluginManifest: Codable, Sendable, Equatable {
         public var live: Bool?
         /// BCP-47 tags to offer in the language picker. Default: a common set.
         public var languages: [String]?
+        /// Transcribes speech that mixes languages, between sentences and within them, without being
+        /// told which language comes when. Suggested to people who speak more than one in meetings.
+        public var multilingual: Bool?
     }
 
     /// An item in a meeting's menu.

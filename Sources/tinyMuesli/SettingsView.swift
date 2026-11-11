@@ -98,12 +98,20 @@ private struct GeneralSettings: View {
 
 private struct RecordingSettings: View {
     let model: AppModel
+    @State private var choosingLanguages = false
 
     var body: some View {
         @Bindable var model = model
         Form {
             TranscriptionSettings(model: model)
             Section {
+                LabeledContent("Spoken in Your Meetings") {
+                    HStack {
+                        Text(model.spokenLanguages.isEmpty ? "Not chosen" : model.spokenLanguages.map(LanguagesPage.name).formatted(.list(type: .and)))
+                            .foregroundStyle(.secondary)
+                        Button("Change…") { choosingLanguages = true }
+                    }
+                }
                 Picker("Language", selection: $model.language) {
                     Text("System Default").tag(String?.none)
                     ForEach(model.languageChoices, id: \.self) { choice in
@@ -118,7 +126,9 @@ private struct RecordingSettings: View {
                     }
                 }
             } footer: {
-                Text(model.transcriptionProvider.transcribesLive
+                Text(model.spokenLanguages.count > 1 && !model.transcriptionProvider.isMultilingual
+                     ? "\(model.transcriptionProvider.name) transcribes one language at a time and offers to switch when it hears another of yours."
+                     : model.transcriptionProvider.transcribesLive
                      ? "You can switch the language during a meeting from the menu."
                      : "System Default lets the provider detect the language, even when it changes during a meeting.")
                     .settingsFooter()
@@ -169,6 +179,21 @@ private struct RecordingSettings: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $choosingLanguages) {
+            VStack(spacing: 0) {
+                LanguagesPage(model: model)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                HStack {
+                    Spacer()
+                    Button("Done") { choosingLanguages = false }
+                        .controlSize(.large)
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(20)
+            }
+            .frame(width: 560, height: 580)
+        }
     }
 
     /// Meeting apps on this Mac, and any chosen before that aren't any more.

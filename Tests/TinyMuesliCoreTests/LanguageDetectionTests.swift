@@ -65,7 +65,7 @@ private func german(_: String) -> [String: Double] { ["de": 0.95] }
 
     @Test func candidatesStartWithWhatTheTextLooksLike() {
         let candidates = LanguageDetector.candidates(
-            text: "Gut, Dunmachhen wir Jets", current: "en-US", offered: offered,
+            text: "Gut, Dunmachhen wir Jets", current: "en-US", offered: offered, spoken: [],
             preferred: ["en-US", "fr-FR"], identify: german
         )
         #expect(candidates.first?.hasPrefix("de") == true)
@@ -75,16 +75,26 @@ private func german(_: String) -> [String: Double] { ["de": 0.95] }
 
     @Test func candidatesUseYourOwnVariant() {
         let candidates = LanguageDetector.candidates(
-            text: "", current: "en-US", offered: offered, preferred: ["en-US", "de-CH"], identify: { _ in [:] }
+            text: "", current: "en-US", offered: offered, spoken: [], preferred: ["en-US", "de-CH"], identify: { _ in [:] }
         )
         #expect(candidates == ["de-CH"])
     }
 
     @Test func candidatesSkipLanguagesTheEngineLacks() {
         let candidates = LanguageDetector.candidates(
-            text: "", current: "en-US", offered: offered, preferred: ["ja-JP"], identify: { _ in ["it": 0.9] }
+            text: "", current: "en-US", offered: offered, spoken: [], preferred: ["ja-JP"], identify: { _ in ["it": 0.9] }
         )
         #expect(candidates.isEmpty)
+    }
+
+    @Test func candidatesAreOnlyTheLanguagesYouSpeak() {
+        // You said you speak Swiss German and English: French in the text isn't tried, and German is
+        // tried in your variant, even though macOS lists French first.
+        let candidates = LanguageDetector.candidates(
+            text: "Bonjour", current: "en-US", offered: offered, spoken: ["en-US", "de-CH"],
+            preferred: ["fr-FR"], identify: { _ in ["fr": 0.9, "de": 0.3] }
+        )
+        #expect(candidates == ["de-CH"])
     }
 
     @Test func suggestsOnlyAClearlyBetterLanguage() {

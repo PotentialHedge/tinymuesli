@@ -330,7 +330,7 @@ private struct SettingRow: View {
 }
 
 /// What a plugin will be able to do, shown before it's installed (or updated).
-private struct ConsentSheet: View {
+struct ConsentSheet: View {
     let candidate: PluginStore.Candidate
     let done: (Bool) -> Void
 

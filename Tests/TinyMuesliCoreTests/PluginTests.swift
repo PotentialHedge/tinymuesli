@@ -39,6 +39,25 @@ struct TestPlugin {
             """.utf8)
     }
 
+    @Test func suggestsMultilingualTranscribersThatOfferEveryLanguage() async throws {
+        func provider(_ id: String, multilingual: Bool, languages: [String]) throws -> PluginTranscriptionProvider {
+            let manifest = try PluginManifest.decode(Data("""
+                {"id": "\(id)", "name": "\(id)", "contributes": {"transcription": {"command": ["true"],
+                 "multilingual": \(multilingual), "languages": ["\(languages.joined(separator: "\", \""))"]}}}
+                """.utf8))
+            return PluginTranscriptionProvider(plugin: Plugin(manifest: manifest, directory: URL(filePath: "/tmp")))!
+        }
+        let providers: [any TranscriptionProvider] = [
+            TranscriptionProviders.apple,
+            try provider("one-at-a-time", multilingual: false, languages: ["de-DE", "en-US"]),
+            try provider("no-german", multilingual: true, languages: ["en-US", "fr-FR"]),
+            try provider("mixes", multilingual: true, languages: ["de-DE", "en-GB", "fr-FR"]),
+        ]
+        // Regions don't matter: Swiss German and American English are German and English.
+        let found = await TranscriptionProviders.multilingual(for: ["de-CH", "en-US"], among: providers)
+        #expect(found.map(\.id) == ["mixes"])
+    }
+
     @Test func checksIdsAndSettingNamespaces() throws {
         #expect(throws: Never.self) { try PluginManifest.decode(manifest("good-one")) }
         #expect(throws: PluginManifest.Problem.badID("Bad_ID")) { try PluginManifest.decode(manifest("Bad_ID")) }

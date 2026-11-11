@@ -108,6 +108,11 @@ and the MCP server take. To change a meeting's title, tags or speaker names, run
 `languages` (BCP-47 tags) fill the language picker; the default is a common set. Speakers are
 identified by tinyMuesli afterwards, so a provider only returns text with timings.
 
+Add `"multilingual": true` if it transcribes speech that mixes languages (between sentences and within
+them) without being told which comes when. People who say in onboarding that their meetings are in
+several languages are offered multilingual providers that cover all of them, and can find them on
+GitHub from there.
+
 **After the meeting** (`"live": false`, the default). Each track (your mic, everyone else) is sent as an
 AAC file once the meeting ends:
 
@@ -116,7 +121,8 @@ AAC file once the meeting ends:
 ```
 
 `detectLanguage` is `true` when the user left the language on System Default: detect it yourself if you
-can, else use `language`. Answer with the phrases, timed in seconds from the start of the file:
+can, else use `language`. `languages`, when present, lists the languages the user said are spoken in
+their meetings (BCP-47, e.g. `["de-CH", "en-US"]`): use them as hints for detecting. Answer with the phrases, timed in seconds from the start of the file:
 
 ```json
 {"phrases": [

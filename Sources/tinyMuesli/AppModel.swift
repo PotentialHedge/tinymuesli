@@ -51,6 +51,10 @@ final class AppModel {
         let variants = languageChoices.first { $0.tag == language }?.variants ?? []
         return variants.count > 1 ? variants : []
     }
+    /// Languages spoken in your meetings (BCP-47 tags); see `Settings.spokenLanguages`.
+    var spokenLanguages = Settings.spokenLanguages {
+        didSet { Settings.spokenLanguages = spokenLanguages }
+    }
     var keepAudio = Settings.keepAudio {
         didSet { Settings.keepAudio = keepAudio }
     }

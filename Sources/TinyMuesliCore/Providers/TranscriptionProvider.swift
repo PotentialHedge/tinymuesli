@@ -14,6 +14,9 @@ public protocol TranscriptionProvider: Sendable {
     var transcribesLive: Bool { get }
     /// Why it can't be used right now (e.g. no API key), or nil when it's ready.
     var setupProblem: String? { get }
+    /// Handles meetings that mix languages by itself. Otherwise it transcribes one language at a
+    /// time, and tinyMuesli switches when it hears another (see `LanguageDetector`).
+    var isMultilingual: Bool { get }
     /// Languages for the picker.
     func offeredLanguages() async -> [Locale]
     /// A transcriber for `preferred` (nil: the system language, or the provider's own choice).
@@ -36,6 +39,18 @@ public enum TranscriptionProviders {
     public static var selected: any TranscriptionProvider {
         provider(id: Settings.transcriptionProvider) ?? apple
     }
+
+    /// Of `providers`, the multilingual ones that offer every one of `languages` (BCP-47 tags; only
+    /// the language counts, not the region), in their given order.
+    public static func multilingual(for languages: [String], among providers: [any TranscriptionProvider]) async -> [any TranscriptionProvider] {
+        let wanted = Set(languages.map(LanguageMonitor.code))
+        var found: [any TranscriptionProvider] = []
+        for provider in providers where provider.isMultilingual {
+            let offered = Set(await provider.offeredLanguages().map { LanguageMonitor.code($0.identifier(.bcp47)) })
+            if wanted.isSubset(of: offered) { found.append(provider) }
+        }
+        return found
+    }
 }
 
 /// Apple's `SpeechAnalyzer`: on-device, live, OS-managed models.
@@ -45,6 +60,7 @@ public struct AppleSpeechProvider: TranscriptionProvider {
     public let isOnDevice = true
     public let transcribesLive = true
     public var setupProblem: String? { nil }
+    public let isMultilingual = false
 
     public func offeredLanguages() async -> [Locale] {
         await AppleSpeechTranscriber.offeredLocales()
