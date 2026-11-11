@@ -398,20 +398,26 @@ final class AppModel {
         }
     }
 
-    /// - Parameter resuming: a finished meeting to carry on recording in (see `resumable`), else a new one.
-    func startRecording(app: MeetingApp?, resuming: URL? = nil) {
-        if case .recording = status { return }
+    /// - Parameters:
+    ///   - resuming: a finished meeting to carry on recording in (see `resumable`), else a new one.
+    ///   - parent: for a new meeting, the folder below the meetings folder to make it in ("" for the
+    ///     meetings folder itself).
+    /// - Returns: the recording's folder once it has started, nil if it didn't.
+    @discardableResult
+    func startRecording(app: MeetingApp?, resuming: URL? = nil, in parent: String = "") -> Task<URL?, Never> {
+        if case .recording = status { return Task { nil } }
         notifications.removePrompt()
         finishEndedMeeting()  // starting afresh: the ended meeting won't be continued
         if let resuming {
             // Its final pass may have started again meanwhile; it rewrites the files.
-            guard !isInUse(resuming) else { return }
+            guard !isInUse(resuming) else { return Task { nil } }
             notifications.removeMeetingEnded(folder: resuming)
         }
-        Task {
+        let store = parent.isEmpty ? store : MeetingStore(root: store.url(ofFolder: parent))
+        return Task {
             guard await MicRecorder.requestPermission() else {
                 lastError = "tinyMuesli needs microphone access. Enable it in System Settings → Privacy & Security → Microphone."
-                return
+                return nil
             }
             // Without a transcriber we still record; the final pass will report the problem. Providers
             // that don't transcribe live get the audio files in the final pass instead.
@@ -438,8 +444,10 @@ final class AppModel {
                 refreshRecentMeetings()
                 // Fetch the diarization models now (first time only) so they're ready at the end.
                 Task { [diarizer] in try? await diarizer.prepare() }
+                return session.folder
             } catch {
                 lastError = "\(error)"
+                return nil
             }
         }
     }
@@ -468,9 +476,39 @@ final class AppModel {
     }
 
     /// Ends the current recording and starts another, for when one meeting runs into the next.
-    func startNewMeeting() {
+    /// - Parameter parent: the folder below the meetings folder to make it in ("" for the meetings folder).
+    @discardableResult
+    func startNewMeeting(in parent: String = "") -> Task<URL?, Never> {
         stopRecording(notify: false)
-        startRecording(app: detector.current)
+        return startRecording(app: detector.current, in: parent)
+    }
+
+    /// The meeting in `folder` is being recorded right now.
+    func isRecording(_ folder: URL) -> Bool {
+        guard case .recording(let session, _) = status else { return false }
+        return Self.samePath(session.folder, folder)
+    }
+
+    /// The meeting in `folder` ended moments ago and is waiting to be continued (see `EndedMeeting`).
+    func isPaused(_ folder: URL) -> Bool {
+        ended.map { Self.samePath($0.session.folder, folder) } ?? false
+    }
+
+    /// Whether `continueMeeting(_:)` can carry on recording the meeting in `folder`: one that is
+    /// waiting to be continued, or any transcribed meeting of your own (not one shared with you)
+    /// while nothing else is being recorded.
+    func canContinue(_ folder: URL, status: MeetingMetadata.Status?, shared: Bool) -> Bool {
+        if isPaused(folder) { return !isRecording }
+        return !isRecording && status == .done && !shared && !isInUse(folder)
+    }
+
+    /// Carries on recording the meeting in `folder` (see `canContinue`).
+    func continueMeeting(_ folder: URL) {
+        if isPaused(folder) {
+            continueMeeting()
+        } else {
+            startRecording(app: detector.current, resuming: folder)
+        }
     }
 
     /// How long after a meeting ends it can still be resumed from the menu.

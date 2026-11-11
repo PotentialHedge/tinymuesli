@@ -28,8 +28,11 @@ struct SpeakerSuggestion: Equatable {
 /// The inspector beside a meeting's chat: title, tags, names for the speakers (with suggestions from
 /// voices named in other meetings and from Apple Intelligence), and how the chat is drawn.
 struct MeetingDetails: View {
+    let model: AppModel
     let folder: URL
     let transcript: ChatTranscript
+    /// Someone shared it with you (it can't be continued).
+    let isShared: Bool
     /// Voices recognised from other meetings (worked out by the chat, which shows them too).
     let suggestions: [SpeakerSuggestion]
     /// Apple Intelligence's title and tags, if it was asked.
@@ -57,6 +60,7 @@ struct MeetingDetails: View {
 
     var body: some View {
         Form {
+            RecordingSection(model: model, folder: folder, status: metadata?.status, isShared: isShared)
             Section("Title") {
                 TextField("Title", text: $title, prompt: Text(metadata?.app ?? "Meeting"))
                     .labelsHidden()
@@ -455,5 +459,63 @@ struct FlowLayout: Layout {
             }
         }
         return rows
+    }
+}
+
+/// Recording controls for the meeting, while it's being recorded or can be carried on: stop or
+/// continue it, and whether your mic is recorded. Nothing for other meetings; they can be
+/// continued from their menu in the list.
+private struct RecordingSection: View {
+    @Bindable var model: AppModel
+    let folder: URL
+    let status: MeetingMetadata.Status?
+    let isShared: Bool
+
+    var body: some View {
+        if model.isRecording(folder) {
+            Section("Recording") {
+                if case .recording(let session, _) = model.status {
+                    LabeledContent {
+                        Text(session.resumedAt ?? session.startedAt, style: .timer)
+                            .monospacedDigit()
+                    } label: {
+                        Label("Recording", systemImage: "record.circle.fill")
+                            .foregroundStyle(.red)
+                    }
+                }
+                Label {
+                    Text(model.mutedText ?? "Your mic is recorded")
+                } icon: {
+                    Image(systemName: model.micMuted ? "mic.slash.fill" : "mic.fill")
+                        .foregroundStyle(model.micMuted ? .orange : .secondary)
+                }
+                .foregroundStyle(model.micMuted ? .primary : .secondary)
+                Toggle("Mute Me", isOn: $model.muteMe)
+                    .help("Your mic records silence until you turn this off")
+                Button {
+                    model.stopRecording()
+                } label: {
+                    Label("Stop Recording", systemImage: "stop.fill")
+                }
+            }
+        } else if model.isPaused(folder) || (model.resumable.map { MeetingBrowser.path($0.folder) == MeetingBrowser.path(folder) } ?? false),
+                  model.canContinue(folder, status: status, shared: isShared) {
+            // Just ended: the meeting may well carry on.
+            Section {
+                Button {
+                    model.continueMeeting(folder)
+                } label: {
+                    Label("Continue Recording", systemImage: "record.circle")
+                }
+            } header: {
+                Text("Recording")
+            } footer: {
+                if let ended = model.ended, model.isPaused(folder) {
+                    Text("Ended. It can be continued in the same recording until \(ended.finishesAt.formatted(date: .omitted, time: .shortened)).")
+                } else {
+                    Text("Records more of this meeting, after what's already transcribed.")
+                }
+            }
+        }
     }
 }

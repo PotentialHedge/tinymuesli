@@ -24,6 +24,8 @@ final class MeetingBrowser {
         let tags: [String]
         /// Apple Intelligence's title, while the meeting has none of its own.
         let suggestedTitle: String?
+        /// Someone shared it with you (it can't be continued).
+        let isShared: Bool
     }
 
     /// A meeting found by the search in the sidebar.
@@ -76,7 +78,7 @@ final class MeetingBrowser {
                     start: summary.start, end: summary.end,
                     status: MeetingMetadata.Status(rawValue: summary.status) ?? .done,
                     speakers: summary.speakers, preview: preview, app: summary.app, tags: summary.tags,
-                    suggestedTitle: summary.suggestedTitle
+                    suggestedTitle: summary.suggestedTitle, isShared: summary.sharedBy != nil
                 ))
             }
             await MainActor.run {
@@ -376,6 +378,13 @@ struct MeetingsWindow: View {
             }
             Divider()
         }
+        if model.isRecording(entry.folder) {
+            Button("Stop Recording") { model.stopRecording() }
+            Divider()
+        } else if model.canContinue(entry.folder, status: entry.status, shared: entry.isShared) {
+            Button("Continue Meeting") { model.continueMeeting(entry.folder) }
+            Divider()
+        }
         Button("Rename…") { promptForName(.renameMeeting(entry)) }
             // Like its details: the recorder and the final pass rewrite the file until it's done.
             .disabled(entry.status != .done && entry.status != .failed)
@@ -405,6 +414,8 @@ struct MeetingsWindow: View {
             .padding(.horizontal, 4)
             .background(dropTarget == folder.path ? Color.accentColor.opacity(0.3) : .clear, in: RoundedRectangle(cornerRadius: 5))
             .contextMenu {
+                Button("New Meeting in “\(folder.name)”") { startMeeting(in: folder.path) }
+                Divider()
                 Button("New Folder…") { promptForName(.create(parent: folder.path)) }
                 Button("Rename…") { promptForName(.rename(path: folder.path)) }
                 Divider()
@@ -414,6 +425,16 @@ struct MeetingsWindow: View {
             }
             .modifier(FolderDragging(enabled: true, item: url, drop: { drop($0, into: folder.path) },
                                      targeted: { targeted($0, folder.path) }))
+    }
+
+    /// Starts recording a new meeting in a folder (ending one being recorded) and shows it.
+    private func startMeeting(in path: String) {
+        reveal(path)
+        Task { @MainActor in
+            guard let folder = await model.startNewMeeting(in: path).value else { return }
+            browser.reload(store: model.store)
+            browser.select(folder)
+        }
     }
 
     // MARK: Folder editing
@@ -575,7 +596,8 @@ struct MeetingsWindow: View {
     @ViewBuilder private var inspector: some View {
         if let folder = browser.selection, session.folder == folder {
             MeetingDetails(
-                folder: folder, transcript: session.transcript, suggestions: session.suggestions, suggested: session.suggested,
+                model: model, folder: folder, transcript: session.transcript, isShared: selectedEntry?.isShared ?? false,
+                suggestions: session.suggestions, suggested: session.suggested,
                 knownTags: knownTags, knownNames: knownNames, speakerColors: $speakerColors,
                 color: { [session, speakerColors] in speakerColor($0, speakers: session.transcript.speakers, colored: speakerColors) },
                 onEdited: {
@@ -609,8 +631,7 @@ struct MeetingsWindow: View {
     }
 
     private func isOngoing(_ entry: MeetingBrowser.Entry) -> Bool {
-        guard case .recording(let session, _) = model.status else { return false }
-        return MeetingBrowser.path(session.folder) == MeetingBrowser.path(entry.folder)
+        model.isRecording(entry.folder)
     }
 }
 
