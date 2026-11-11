@@ -97,9 +97,11 @@ extension SharedMeeting {
 
     // MARK: - Email
 
-    /// The email body for Mail: inline styles only, since mail apps drop or rewrite style sheets, and
-    /// no script. Colours that read on light and dark backgrounds alike, since some mail apps darken
-    /// the page and others don't.
+    /// The email body for Mail: inline styles, since mail apps drop or rewrite style sheets, and no
+    /// script. It declares that it handles dark mode itself: otherwise Apple Mail recolours it for
+    /// dark mode, which lightens the blue bubbles and darkens their white text. The only style sheet
+    /// switches the grey bubbles and lines to dark ones; where it's dropped they stay light grey
+    /// with black text, which reads on either background.
     public func emailHTML() throws -> String {
         let importLink = try importURL().absoluteString
         let font = "font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;"
@@ -115,17 +117,27 @@ extension SharedMeeting {
                     chat += "<div style=\"\(secondary)font-size:11px;margin:0 0 2px 12px\">\(Self.escape(speaker))</div>"
                 }
                 let colours = mine ? "background:#0a84ff;color:#ffffff;" : "background:#e9e9eb;color:#000000;"
-                chat += "<span style=\"display:inline-block;max-width:75%;text-align:left;\(colours)border-radius:18px;padding:7px 12px;font-size:15px;line-height:1.35\">\(Self.escape(text))</span></div>\n"
+                chat += "<span\(mine ? "" : " class=\"tm-grey\"") style=\"display:inline-block;max-width:75%;text-align:left;\(colours)border-radius:18px;padding:7px 12px;font-size:15px;line-height:1.35\">\(Self.escape(text))</span></div>\n"
             }
         }
         let date = transcript.start.formatted(date: .complete, time: .shortened)
         let facts = ([date] + details).joined(separator: " · ")
         let tagLine = tags.isEmpty ? "" : "<div style=\"\(secondary)font-size:13px;margin-top:4px\">" + tags.map { "#" + Self.escape($0) }.joined(separator: " ") + "</div>"
         return """
-        <html><body style="\(font)">
+        <html><head>
+        <meta name="color-scheme" content="light dark">
+        <meta name="supported-color-schemes" content="light dark">
+        <style>
+        :root { color-scheme: light dark; supported-color-schemes: light dark; }
+        @media (prefers-color-scheme: dark) {
+          .tm-grey { background: #3a3a3c !important; color: #ffffff !important; }
+          .tm-line { border-color: #48484a !important; }
+        }
+        </style>
+        </head><body style="\(font)color-scheme:light dark">
         <div><br></div>
         <div style="\(font)max-width:640px">
-        <div style="border:1px solid #d1d1d6;border-radius:14px;padding:14px 16px;margin:8px 0 16px">
+        <div class="tm-line" style="border:1px solid #d1d1d6;border-radius:14px;padding:14px 16px;margin:8px 0 16px">
         <div style="\(secondary)font-size:12px">Meeting transcript</div>
         <div style="font-size:20px;font-weight:700;margin:2px 0 4px">\(Self.escape(name))</div>
         <div style="\(secondary)font-size:13px">\(Self.escape(facts))</div>
@@ -135,7 +147,7 @@ extension SharedMeeting {
         <div style="\(secondary)font-size:12px;margin-top:8px">With tinyMuesli on your Mac, the button adds this meeting to your meetings, to search it and ask your AI assistant about it.</div>
         </div>
         \(chat.isEmpty ? "<div style=\"\(secondary)\">Nobody said anything in this meeting.</div>" : chat)
-        <div style="border-top:1px solid #d1d1d6;margin-top:24px;padding-top:12px;\(secondary)font-size:12px;line-height:1.5">
+        <div class="tm-line" style="border-top:1px solid #d1d1d6;margin-top:24px;padding-top:12px;\(secondary)font-size:12px;line-height:1.5">
         Transcribed on \(Self.escape(sharedBy))’s Mac by <a href="\(Self.website)" style="color:#0a84ff;text-decoration:none">tinyMuesli</a>, which takes notes in your meetings: it notices when a call starts, transcribes it and works out who said what, all on your Mac. Free and open source, at <a href="\(Self.website)" style="color:#0a84ff;text-decoration:none">tinymuesli.com</a>.
         </div>
         </div>

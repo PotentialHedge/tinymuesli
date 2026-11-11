@@ -65,7 +65,9 @@ import Testing
         let email = try shared.emailHTML()
         #expect(try SharedMeeting(html: email) == shared)
         #expect(email.contains("Hi &lt;everyone&gt; &amp; welcome."))
-        #expect(!email.contains("<script") && !email.contains("<style"))
+        #expect(!email.contains("<script"))
+        // Declares dark mode support, so Mail doesn't recolour the bubbles.
+        #expect(email.contains("<meta name=\"color-scheme\" content=\"light dark\">"))
         // The sharer is on the right in blue, everyone else on the left.
         #expect(email.contains("text-align:right;margin:10px 0 0\"><span style=\"display:inline-block;max-width:75%;text-align:left;background:#0a84ff"))
         #expect(shared.emailSubject.hasPrefix("Roadmap \"Q4\" – "))
