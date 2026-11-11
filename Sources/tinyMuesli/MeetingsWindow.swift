@@ -384,8 +384,8 @@ struct MeetingsWindow: View {
         }
         if entry.status == .done {
             Divider()
-            ShareLink(item: SharedMeetingPage(folder: entry.folder), preview: SharePreview(SharedMeetingPage.title(of: entry.folder)))
-            Button("Save as Web Page…") { SharedMeetingPage(folder: entry.folder).save() }
+            Button("Share…") { MeetingSharer.shared.shareAtPointer(folder: entry.folder) }
+            Button("Save as Web Page…") { WebPageExport.save(folder: entry.folder) }
         }
         Divider()
         Button("Delete Meeting…", role: .destructive) { model.confirmDelete(entry.folder) }
@@ -946,10 +946,8 @@ private struct ChatView: View {
             }
             if transcript.metadata?.status == .done {
                 ToolbarItem {
-                    ShareLink(item: SharedMeetingPage(folder: folder), preview: SharePreview(SharedMeetingPage.title(of: folder))) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                    .help("Share this meeting as a web page, which anyone with tinyMuesli can add to their meetings")
+                    ShareButton(folder: folder)
+                        .help("Share this meeting as a web page, which anyone with tinyMuesli can add to their meetings")
                 }
             }
             ToolbarItem {

@@ -91,7 +91,8 @@ both.
 ## Sharing a meeting
 
 **Share** in the Meetings window's toolbar (or right-click a meeting: Share, Save as Web Page…)
-sends a finished meeting as a single web page. It shows the transcript as a chat and opens in any
+sends a finished meeting as a single web page (by email through Apple Mail, as the email itself, in
+the same chat bubbles; the first time, macOS asks to let tinyMuesli control Mail). It shows the transcript as a chat and opens in any
 browser, so the recipient doesn't need tinyMuesli. If they have it, **Add to tinyMuesli** on the page
 adds the meeting to their meetings, after asking, marked with who shared it. The meeting travels inside the page's link, so
 nothing is uploaded anywhere. The page holds only the transcript: title, tags, times and who said
@@ -99,6 +100,7 @@ what. Audio and voice prints stay on your Mac. "Me" is shown as your macOS accou
 
 ```sh
 tinymuesli share "<meeting id>" --output roadmap.html   # --name "Ben" to choose the name for Me
+tinymuesli share "<meeting id>" --email --output body.html  # the email's HTML instead
 tinymuesli import roadmap.html                           # or a tinymuesli://import link
 ```
 

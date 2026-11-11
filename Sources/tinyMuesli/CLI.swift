@@ -58,6 +58,7 @@ enum CLI {
           share MEETING             Save a finished meeting as a web page to send: it shows the transcript, and
                  [--output FILE]    anyone with tinyMuesli can add the meeting from it ("Me" becomes your name)
                  [--name NAME]      The name for "Me" (default: your macOS account's full name)
+                 [--email]          Write the HTML body of an email instead (what Share › Mail writes)
           import PAGE               Add a meeting from a page made by share (or a tinymuesli://import link)
           mcp                       Run the MCP server on stdin/stdout
 
@@ -391,6 +392,7 @@ enum CLI {
     private static func share(_ args: [String]) -> Int32 {
         var output: String?
         var name = NSFullUserName()
+        var email = false
         var rest: [String] = []
         var i = 0
         while i < args.count {
@@ -401,6 +403,9 @@ enum CLI {
             case "--name" where i + 1 < args.count:
                 name = args[i + 1]
                 i += 2
+            case "--email":
+                email = true
+                i += 1
             default:
                 rest.append(args[i])
                 i += 1
@@ -413,7 +418,7 @@ enum CLI {
         do {
             let shared = try SharedMeeting(folder: folder, sharedBy: name)
             let url = URL(fileURLWithPath: output ?? shared.fileName)
-            try shared.html().write(to: url, atomically: true, encoding: .utf8)
+            try (email ? shared.emailHTML() : shared.html()).write(to: url, atomically: true, encoding: .utf8)
             print(url.path)
             return 0
         } catch {

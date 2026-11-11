@@ -60,6 +60,17 @@ import Testing
         #expect(MeetingMetadata(parsing: MeetingMetadata(start: start, app: nil, status: .done).frontmatter())?.sharedBy == nil)
     }
 
+    @Test func emailCarriesTheMeetingWithoutScripts() throws {
+        let shared = try SharedMeeting(folder: makeMeeting(), sharedBy: "Ben")
+        let email = try shared.emailHTML()
+        #expect(try SharedMeeting(html: email) == shared)
+        #expect(email.contains("Hi &lt;everyone&gt; &amp; welcome."))
+        #expect(!email.contains("<script") && !email.contains("<style"))
+        // The sharer is on the right in blue, everyone else on the left.
+        #expect(email.contains("text-align:right;margin:10px 0 0\"><span style=\"display:inline-block;max-width:75%;text-align:left;background:#0a84ff"))
+        #expect(shared.emailSubject.hasPrefix("Roadmap \"Q4\" – "))
+    }
+
     @Test func rejectsDamagedPayloads() {
         #expect(throws: SharedMeeting.ShareError.unreadable) { try SharedMeeting(payload: "not-a-meeting") }
         #expect(throws: SharedMeeting.ShareError.unreadable) { try SharedMeeting(html: "<html></html>") }

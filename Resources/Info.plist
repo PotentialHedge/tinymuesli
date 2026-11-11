@@ -33,6 +33,8 @@
 	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>tinyMuesli records the other participants in your meeting. Audio never leaves your Mac.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>When you share a meeting by email, tinyMuesli writes the transcript into a new email in Mail.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>tinyMuesli records your side of the meeting. Audio never leaves your Mac.</string>
 	<key>SUFeedURL</key>
