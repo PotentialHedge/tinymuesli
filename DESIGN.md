@@ -5,7 +5,7 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
 ## Principles
 
 - **The filesystem is the API.** tinyMuesli writes well-structured plain files. Everything else (summaries, chat, integrations) happens outside it: in your agent, through MCP, hooks, or the CLI.
-- **100% local, privacy first.** No network access except optional model downloads and update checks. Free and open source.
+- **Local by default, privacy first.** No network access except optional model downloads and update checks, unless you pick a cloud provider (see Providers), which only then gets the meeting's audio. Free and open source.
 - **Small.** Native binary (a few MB), no bundled runtime. Models are downloaded on first use, never bundled.
 - **Minimal UI.** A menu bar status icon, a list of meetings, and a Meetings window that shows transcripts as chats, where you can give a meeting a title and tags and name its speakers.
 
@@ -17,7 +17,7 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
 | Language / shell | Swift, SwiftUI `MenuBarExtra`; one binary that also runs as the CLI and MCP server |
 | System audio | Core Audio process taps (no Screen Recording permission) |
 | Mic | Separate track, voice processing on (echo cancellation) |
-| Transcription | Apple `SpeechAnalyzer` / `SpeechTranscriber`: on-device, OS-managed models (the OS downloads a language's model on first use via `AssetInventory`; not counted in our size). Behind a `Transcriber` protocol (a stream: append audio, get timed phrases) so Parakeet/Whisper can be added later |
+| Transcription | Apple `SpeechAnalyzer` / `SpeechTranscriber`: on-device, OS-managed models (the OS downloads a language's model on first use via `AssetInventory`; not counted in our size). Behind a `Transcriber` protocol (a stream: append audio, get timed phrases), made by a `TranscriptionProvider` (see Providers) |
 | Languages | Picker in the menu and in Settings: English, de, fr, es, it, pt, nl, the Nordic languages, pl and zh, filtered to `SpeechTranscriber.supportedLocales` at runtime (on macOS 26.6: en, de, fr, es, it, pt and zh variants). One entry per language (Simplified and Traditional Chinese stay separate), defaulting to the variant for the Mac's region if there is one, else the language's main one; a second Variant picker offers the others. The CLI's `--language` takes any variant. Default: the system language, else en-US |
 | Language changes | The engine needs a locale and can't identify languages, so each track is watched while recording (`LanguageMonitor`): a check runs when the last 30 s of words score below 0.6 confidence, or when NaturalLanguage reads them as another language (some models write a language they don't know out in that language with barely lower confidence: Swiss German scores English speech 0.6–0.8, the English model scores German 0.2–0.4). The check (`LanguageDetector`) transcribes that audio in the current language and up to three candidates (the text's language, then your macOS languages) and suggests one that scores 0.15 higher, or 0.04 higher if the text agrees. You're asked by notification (and in the menu); a switch re-transcribes that track from where the new language started, from the last 5 min of audio kept at 16 kHz (`LanguageSwitchingStream`), and is saved as `language-switches` so a re-run from the audio does the same. The menu's Meeting Language switches both tracks from now |
 | Speaker ID | Mic vs system channel gives Me / Others. FluidAudio's offline pipeline (pyannote segmentation + WeSpeaker embeddings + VBx, CoreML; ~34 MB of models from Hugging Face on first use) diarizes the system track into Speaker 1..n, numbered by first appearance. The mic track is diarized too, since it can hear more than you (a room, someone beside you): voices with under 5 s of words count as Me, the one with most speech is Me, and the rest are split off as further Speaker n. Without a meeting app (a local recording) that happens straight away; in a call it's only offered (`mic-voices.json`: a bar below the meeting's title says "“Me” may be more than one person", with Split Me… and Keep as Me, which drops the offer), since there the mic is nearly always just you. A voice split off the mic can be merged back into Me; nobody from the system track can. Words are attributed individually, so a phrase spanning a change of speaker is split |
@@ -31,7 +31,7 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
 | Audio retention | Optional, **off by default** (transcript only): `audio/` is deleted 24 h after a successful final pass, so a meeting can still be transcribed again (e.g. one recorded before a diarizer change). The final pass writes `audio/.expires` (ISO date); the app deletes marked folders of done meetings whose time is up (`audio-n/` too) at launch and hourly, never audio without the mark, and not at all while "Keep Audio After Transcribing" is on (a final pass with it on takes the mark off). The CLI's `transcribe --delete-audio` deletes at once |
 | Pipeline | Each track is transcribed live as it's recorded; `transcript.md` grows during the meeting (remote speech labelled "Others"). At the end, the final pass diarizes the system track and rewrites `transcript.md` + `transcript.json` with speakers. If live transcription of a track failed, the final pass transcribes its file instead |
 | Crash safety | Audio is CAF (readable without finalising) and is only deleted after success. Frontmatter `status` tracks progress (`recording → recorded → transcribing → done`, or `failed` + `error`); at launch, unfinished meetings that still have audio are processed. Failed ones aren't retried automatically (`tinymuesli transcribe` re-runs) |
-| Extensibility | MCP server (stdio; hand-written, no SDK) that reads, and only writes a meeting's title, tags and speaker names, an `on-meeting-end` hook executable, CLI. No in-process plugins |
+| Extensibility | MCP server (stdio; hand-written, no SDK) that reads, and only writes a meeting's title, tags and speaker names, an `on-meeting-end` hook executable, CLI. Providers and meeting-end agents are compiled in behind protocols (see Providers); no dynamically loaded plugins |
 | Skipping silence | Optional, **off by default** ("Skip Silence While Recording"). Silero VAD (FluidAudio, CoreML on the CPU; ~1 MB model downloaded on first use) scores each 256 ms; stretches without speech are written as zeros, which AAC stores in ~4 kbps instead of ~32 (a quiet room is never digital silence). Errs towards keeping audio: threshold 0.5, 0.5 s kept before speech and 1.5 s after, and a failing model keeps everything. Zeros rather than cuts, so the tracks stay aligned. On a 105-minute meeting it changed fewer words than re-running transcription on the same audio; a quiet 11-minute stretch went from 5.5 MB to 0.6 MB |
 | Audio threads | The capture callback only mixes down into a preallocated lock-free ring (holds 11–22 s). A queue drains it every 50 ms to encode, write and feed live transcription. If that falls too far behind, audio is dropped rather than blocking the callback, and the gap becomes silence |
 | Distribution | Planned: notarized DMG; Homebrew cask |
@@ -95,6 +95,38 @@ the start of the recording; `track` is `mic` or `system`), plus `start`, `end`, 
 and `speakers`.
 
 Any search index is a derived cache that can be rebuilt from these files.
+
+## Providers
+
+Each pluggable part is a protocol plus a registry listing the compiled-in implementations; adding one is
+a new conforming type and a line in the registry. Nothing is loaded at runtime.
+
+| Part | Protocol | Registry | Implementations |
+|---|---|---|---|
+| Transcription | `TranscriptionProvider` (makes a `Transcriber`) | `TranscriptionProviders` | `apple` (default; on-device, live), `elevenlabs` (Scribe v2, cloud) |
+| Suggestions | `SuggestionProvider` | `SuggestionProviders` | `apple-intelligence` |
+| After each meeting | `MeetingAgent` | `MeetingAgents` | `hook` (the shell hook), `claude-code` |
+
+- **Choosing:** Settings › Recording › Transcription (`transcriptionProvider` preference), and `--provider ID`
+  on `record` and `transcribe`. `tinymuesli providers` lists them all and what's on.
+- **Live or not:** a provider says whether it `transcribesLive`. Apple's gets audio while recording, so
+  `transcript.md` grows during the meeting. A cloud provider doesn't (no audio leaves the Mac while you're in
+  the call, and nothing is lost to a dropped connection): the final pass transcribes each track's file,
+  through the same `Transcriber` stream, which collects the audio into a temporary AAC file and uploads it on
+  `finish()`. Language monitoring only runs on live tracks.
+- **ElevenLabs:** `POST /v1/speech-to-text`, `scribe_v2`, word timestamps, its own diarization and audio
+  events off (speakers still come from FluidAudio on this Mac, so voice prints keep working). With System
+  Default as the language it detects the language itself; a chosen language is sent as `language_code`.
+  Words are grouped into phrases at sentence ends and 1 s pauses. The API key is kept in the login keychain
+  (`APIKeys`; `ELEVENLABS_API_KEY` overrides it), never in preferences or meeting files.
+- **Agents:** after each final pass, the hook runs (if installed) and so does each agent turned on in Settings ›
+  Assistants › After Each Meeting (`enabledAgents`), each on its own task. Claude Code runs as
+  `zsh -lc 'exec claude "$@"'`, so it's found on the login PATH and uses the user's own login, settings,
+  MCP servers and skills. Its arguments are `-p <prompt>`, where the prompt is editable and has the meeting's
+  id and paths added, plus `--mcp-config` with this binary's MCP server for this run and `--allowedTools
+  mcp__tinymuesli`. Everything is passed as arguments, never through the shell. It runs only for `done`
+  meetings, and its output goes to `~/Library/Logs/tinyMuesli/claude-code.log`. `tinymuesli run-agents
+  MEETING [--agent ID]` runs them by hand.
 
 ## Agent access
 

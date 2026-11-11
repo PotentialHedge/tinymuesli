@@ -5,7 +5,7 @@ import TinyMuesliCore
 /// it onto the PATH), else `tinyMuesli.app/Contents/MacOS/tinyMuesli <command>`.
 @MainActor
 enum CLI {
-    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "mcp", "help", "--help", "-h"]
+    static let commands: Set<String> = ["mic-users", "mute-state", "record", "transcribe", "languages", "list", "show", "search", "speakers", "update", "suggest", "run-agents", "providers", "mcp", "help", "--help", "-h"]
 
     static func run(_ args: [String]) -> Int32 {
         switch args.first {
@@ -20,6 +20,8 @@ enum CLI {
         case "speakers": return speakers(Array(args.dropFirst()))
         case "update": return update(Array(args.dropFirst()))
         case "suggest": return suggest(Array(args.dropFirst()))
+        case "run-agents": return runAgents(Array(args.dropFirst()))
+        case "providers": return providers()
         case "share": return share(Array(args.dropFirst()))
         case "import": return importShared(Array(args.dropFirst()))
         case "mcp": return mcp(Array(args.dropFirst()))
@@ -40,10 +42,13 @@ enum CLI {
           record [--seconds N]      Record mic + system audio (default 10s) into a new meeting folder
                  [--root DIR]       Meetings root (default: the app's setting, else ~/Meetings)
                  [--no-transcribe]  Skip the transcription pass afterwards
+                 [--provider ID]    Transcription provider (see providers; default: the app's setting)
           transcribe FOLDER         (Re)run transcription + speaker identification on a meeting folder
                  [--language TAG]   e.g. en-US, de-DE (default: the app's setting, else the system language)
                  [--no-diarize]     Label remote speech "Others" instead of Speaker 1..n
                  [--delete-audio]   Delete audio/ afterwards (kept by default here, so you can re-run)
+                 [--provider ID]    Transcription provider (see providers; default: the app's setting)
+          providers                 List transcription providers and meeting-end agents, and which are on
           languages                 List transcription languages supported on this Mac
           list [--limit N]          List meetings, most recent first
           show MEETING              Print a meeting's transcript.md (MEETING: an id from list, or a folder)
@@ -59,6 +64,8 @@ enum CLI {
                  [--output FILE]    anyone with tinyMuesli can add the meeting from it ("Me" becomes your name)
                  [--name NAME]      The name for "Me" (default: your macOS account's full name)
                  [--email]          Write the HTML body of an email instead (what Share › Mail writes)
+          run-agents MEETING        Run the on-meeting-end hook and the agents turned on in Settings for a meeting
+                 [--agent ID]       Just this agent (e.g. claude-code), whether it's turned on or not
           import PAGE               Add a meeting from a page made by share (or a tinymuesli://import link)
           mcp                       Run the MCP server on stdin/stdout
 
@@ -108,9 +115,14 @@ enum CLI {
         var seconds: TimeInterval = 10
         var transcribe = true
         var store = MeetingStore()
+        var provider = TranscriptionProviders.selected
         var i = 0
         while i < args.count {
             switch args[i] {
+            case "--provider" where i + 1 < args.count:
+                guard let chosen = TranscriptionProviders.provider(id: args[i + 1]) else { return fail("error: no provider \"\(args[i + 1])\" (see tinymuesli providers)") }
+                provider = chosen
+                i += 2
             case "--seconds" where i + 1 < args.count:
                 seconds = TimeInterval(args[i + 1]) ?? seconds
                 i += 2
@@ -132,9 +144,11 @@ enum CLI {
         if granted == false { print("warning: no microphone permission; mic track will be silent") }
 
         do {
-            let transcriber = transcribe ? wait { try? await AppleSpeechTranscriber.make(preferred: Settings.language) } : nil
+            let provider = provider
+            let transcriber = transcribe ? wait { try? await provider.makeTranscriber(preferred: Settings.language) } : nil
             let speechDetector = Settings.skipSilence ? wait { try? await SileroSpeechDetector.load() } : nil
-            let session = try RecordingSession(store: store, app: nil, transcriber: transcriber, speechDetector: speechDetector)
+            let session = try RecordingSession(store: store, app: nil, transcriber: provider.transcribesLive ? transcriber : nil,
+                                               speechDetector: speechDetector)
             try session.start()
             session.warnings.forEach { print("warning: \($0)") }
             print("Recording for \(Int(seconds))s into \(session.folder.path)")
@@ -166,9 +180,14 @@ enum CLI {
         var language: Locale? = Settings.language
         var diarize = true
         var keepAudio = true
+        var provider = TranscriptionProviders.selected
         var i = 0
         while i < args.count {
             switch args[i] {
+            case "--provider" where i + 1 < args.count:
+                guard let chosen = TranscriptionProviders.provider(id: args[i + 1]) else { return fail("error: no provider \"\(args[i + 1])\" (see tinymuesli providers)") }
+                provider = chosen
+                i += 2
             case "--language" where i + 1 < args.count:
                 language = Locale(identifier: args[i + 1])
                 i += 2
@@ -193,10 +212,10 @@ enum CLI {
 
         do {
             let started = Date()
-            let (language, diarize, keepAudio) = (language, diarize, keepAudio)
+            let (language, diarize, keepAudio, provider) = (language, diarize, keepAudio, provider)
             let result = try wait { () async throws -> MeetingProcessor.Result in
-                let transcriber = try await AppleSpeechTranscriber.make(preferred: language)
-                print("Language: \(transcriber.language)")
+                let transcriber = try await provider.makeTranscriber(preferred: language)
+                print("Provider: \(provider.name), language: \(transcriber.language)")
                 let processor = MeetingProcessor(
                     transcriber: transcriber,
                     diarizer: diarize ? FluidDiarizer() : nil,
@@ -216,7 +235,8 @@ enum CLI {
     }
 
     private static func languages() -> Int32 {
-        let locales = wait { await AppleSpeechTranscriber.offeredLocales() }
+        let provider = TranscriptionProviders.selected
+        let locales = wait { await provider.offeredLanguages() }
         for locale in locales {
             print("\(locale.identifier(.bcp47))\t\(Locale.current.localizedString(forIdentifier: locale.identifier) ?? "")")
         }
@@ -373,10 +393,10 @@ enum CLI {
         guard let folder = MeetingLibrary(store: options.store).folder(id: options.positional[0]) else {
             return fail("error: no meeting \"\(options.positional[0])\" (see tinymuesli list)")
         }
-        let suggester = MeetingSuggester(store: options.store, excluding: folder)
+        let (store, provider) = (options.store, SuggestionProviders.selected)
         let suggestions: MeetingSuggestions
         do {
-            suggestions = try wait { try await suggester.suggest(folder: folder) { FileHandle.standardError.write(Data("note: \($0)\n".utf8)) } }
+            suggestions = try wait { try await provider.suggest(folder: folder, store: store) { FileHandle.standardError.write(Data("note: \($0)\n".utf8)) } }
         } catch {
             return fail("error: \(error.localizedDescription)")
         }
@@ -443,6 +463,61 @@ enum CLI {
         } catch {
             return fail("error: \(error.localizedDescription)")
         }
+    }
+
+    private static func providers() -> Int32 {
+        let selected = TranscriptionProviders.selected.id
+        print("Transcription:")
+        for provider in TranscriptionProviders.all {
+            let state = provider.setupProblem ?? (provider.isOnDevice ? "on this Mac" : "cloud")
+            print("  \(provider.id == selected ? "*" : " ") \(provider.id)\t\(provider.name)\t\(state)")
+        }
+        print("Suggestions:")
+        for provider in SuggestionProviders.all {
+            print("  \(provider.id == SuggestionProviders.selected.id ? "*" : " ") \(provider.id)\t\(provider.name)\t\(provider.isAvailable ? "ready" : "not available")")
+        }
+        print("After each meeting:")
+        let enabled = Set(MeetingAgents.enabled(binaryPath: binaryPath).map(\.id))
+        for agent in [MeetingEndHook()] + MeetingAgents.optional(binaryPath: binaryPath) {
+            print("  \(enabled.contains(agent.id) ? "*" : " ") \(agent.id)\t\(agent.name)\tlog: \(agent.log.path)")
+        }
+        return 0
+    }
+
+    private static var binaryPath: String { Bundle.main.executablePath ?? CommandLine.arguments[0] }
+
+    private static func runAgents(_ args: [String]) -> Int32 {
+        var rest = args
+        var only: String?
+        if let index = rest.firstIndex(of: "--agent"), index + 1 < rest.count {
+            only = rest[index + 1]
+            rest.removeSubrange(index...index + 1)
+        }
+        guard let options = LibraryOptions(rest), options.positional.count == 1, options.limit == nil, !options.json else { return usageError() }
+        guard let folder = MeetingLibrary(store: options.store).folder(id: options.positional[0]) else {
+            return fail("error: no meeting \"\(options.positional[0])\" (see tinymuesli list)")
+        }
+        let all: [any MeetingAgent] = [MeetingEndHook()] + MeetingAgents.optional(binaryPath: binaryPath).map {
+            guard var claude = $0 as? ClaudeCodeAgent else { return $0 }
+            claude.store = options.store
+            return claude
+        }
+        let agents = only.map { id in all.filter { $0.id == id } } ?? MeetingAgents.enabled(binaryPath: binaryPath)
+        guard !agents.isEmpty else { return fail(only.map { "error: no agent \"\($0)\" (see tinymuesli providers)" } ?? "Nothing to run: no hook installed and no agent turned on.") }
+        let status = ChatTranscript.load(folder: folder).metadata?.status ?? .failed
+        var failed = false
+        for agent in agents {
+            print("Running \(agent.name)…")
+            let outcome = wait { await agent.run(folder: folder, status: status) }
+            switch outcome {
+            case .exited(0): print("  done (log: \(agent.log.path))")
+            case .skipped: print("  skipped: the meeting's status is \(status.rawValue)")
+            case .notInstalled: print("  not installed"); failed = true
+            case .exited(let code): print("  exited with status \(code) (log: \(agent.log.path))"); failed = true
+            case .couldNotLaunch(let reason): print("  couldn't launch: \(reason)"); failed = true
+            }
+        }
+        return failed ? 1 : 0
     }
 
     private static func mcp(_ args: [String]) -> Int32 {

@@ -74,6 +74,27 @@ public enum Settings {
         set { defaults.set(newValue, forKey: "suggestWithAppleIntelligence") }
     }
 
+    /// Id of the `TranscriptionProvider` to use. Default: Apple's, on this Mac.
+    public static var transcriptionProvider: String {
+        get { defaults.string(forKey: "transcriptionProvider") ?? TranscriptionProviders.apple.id }
+        set { defaults.set(newValue, forKey: "transcriptionProvider") }
+    }
+
+    /// Ids of the `MeetingAgent`s that run after each meeting (besides the hook). None by default.
+    public static var enabledAgents: Set<String> {
+        get { Set(defaults.stringArray(forKey: "enabledAgents") ?? []) }
+        set { defaults.set(newValue.sorted(), forKey: "enabledAgents") }
+    }
+
+    /// What Claude Code is asked after each meeting. nil = `ClaudeCodeAgent.defaultPrompt`.
+    public static var claudeCodePrompt: String {
+        get { defaults.string(forKey: "claudeCodePrompt") ?? ClaudeCodeAgent.defaultPrompt }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(trimmed.isEmpty || trimmed == ClaudeCodeAgent.defaultPrompt ? nil : newValue, forKey: "claudeCodePrompt")
+        }
+    }
+
     /// Where meeting folders go. nil = `MeetingStore.defaultRoot` (~/Meetings).
     public static var meetingsFolder: URL? {
         get { defaults.string(forKey: "meetingsFolder").map { URL(fileURLWithPath: $0, isDirectory: true) } }

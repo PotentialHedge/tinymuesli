@@ -54,6 +54,23 @@ final class AppModel {
     var keepAudio = Settings.keepAudio {
         didSet { Settings.keepAudio = keepAudio }
     }
+    /// Id of the `TranscriptionProvider` in use (see `TranscriptionProviders`).
+    var transcriptionProviderID = Settings.transcriptionProvider {
+        didSet {
+            Settings.transcriptionProvider = transcriptionProviderID
+            Task { languages = await transcriptionProvider.offeredLanguages() }
+        }
+    }
+    var transcriptionProvider: any TranscriptionProvider {
+        TranscriptionProviders.provider(id: transcriptionProviderID) ?? TranscriptionProviders.apple
+    }
+    /// Ids of the meeting-end agents turned on (see `MeetingAgents`).
+    var enabledAgents = Settings.enabledAgents {
+        didSet { Settings.enabledAgents = enabledAgents }
+    }
+    var claudeCodePrompt = Settings.claudeCodePrompt {
+        didSet { Settings.claudeCodePrompt = claudeCodePrompt }
+    }
     var suggestWithAppleIntelligence = Settings.suggestWithAppleIntelligence {
         didSet {
             Settings.suggestWithAppleIntelligence = suggestWithAppleIntelligence
@@ -146,7 +163,7 @@ final class AppModel {
         startPolling()
         startAudioCleanup()
         Task {
-            languages = await AppleSpeechTranscriber.offeredLocales()
+            languages = await transcriptionProvider.offeredLanguages()
             resumeUnfinishedMeetings()
             suggestForEarlierMeetings()
         }
@@ -326,8 +343,11 @@ final class AppModel {
                 lastError = "tinyMuesli needs microphone access. Enable it in System Settings → Privacy & Security → Microphone."
                 return
             }
-            // Without a transcriber we still record; the final pass will report the problem.
-            let transcriber = try? await AppleSpeechTranscriber.make(preferred: language.map(Locale.init(identifier:)))
+            // Without a transcriber we still record; the final pass will report the problem. Providers
+            // that don't transcribe live get the audio files in the final pass instead.
+            let provider = transcriptionProvider
+            let transcriber = provider.transcribesLive
+                ? try? await provider.makeTranscriber(preferred: language.map(Locale.init(identifier:))) : nil
             do {
                 if skipSilence, speechDetector == nil { loadSpeechDetector() }  // for the next meeting
                 let detector = skipSilence ? speechDetector : nil
@@ -720,7 +740,7 @@ final class AppModel {
     private func process(_ folder: URL, live: @escaping @MainActor () async -> [Track: [Phrase]] = { [:] }) {
         guard !processing.contains(folder) else { return }
         processing.insert(folder)
-        let (language, keepAudio, diarizer) = (language, keepAudio, diarizer)
+        let (language, keepAudio, diarizer, provider) = (language, keepAudio, diarizer, transcriptionProvider)
         Task {
             defer {
                 processing.remove(folder)
@@ -729,9 +749,9 @@ final class AppModel {
             }
             let phrases = await live()
             var outcome = MeetingMetadata.Status.failed
-            defer { runHook(folder: folder, status: outcome) }
+            defer { runAgents(folder: folder, status: outcome) }
             do {
-                let transcriber = try await AppleSpeechTranscriber.make(preferred: language.map(Locale.init(identifier:)))
+                let transcriber = try await provider.makeTranscriber(preferred: language.map(Locale.init(identifier:)))
                 let processor = MeetingProcessor(transcriber: transcriber, diarizer: diarizer, keepAudio: keepAudio,
                                                  deleteAudioAfter: AudioRetention.grace)
                 let result = try await processor.process(folder: folder, live: phrases)
@@ -744,18 +764,23 @@ final class AppModel {
         }
     }
 
-    /// Not awaited: a slow hook shouldn't keep the meeting showing as processing.
-    private func runHook(folder: URL, status: MeetingMetadata.Status) {
+    /// The hook and the agents turned on, each on its own. Not awaited: a slow agent shouldn't keep
+    /// the meeting showing as processing.
+    private func runAgents(folder: URL, status: MeetingMetadata.Status) {
         guard !pendingDeletion.contains(folder) else { return }  // it's about to go
-        let hook = MeetingEndHook()
-        Task {
-            switch await hook.run(folder: folder, status: status) {
-            case .notInstalled, .exited(0):
-                break
-            case .exited(let code):
-                lastError = "on-meeting-end hook exited with status \(code). See \(hook.log.path)."
-            case .couldNotLaunch(let reason):
-                lastError = "Couldn't run the on-meeting-end hook: \(reason)"
+        let binary = Bundle.main.executablePath ?? CommandLine.arguments[0]
+        for agent in MeetingAgents.enabled(binaryPath: binary) {
+            Task {
+                switch await agent.run(folder: folder, status: status) {
+                case .notInstalled where agent.id != MeetingEndHook().id:
+                    lastError = "\(agent.name) isn't installed, or isn't on your login shell's PATH."
+                case .notInstalled, .skipped, .exited(0):
+                    break
+                case .exited(let code):
+                    lastError = "\(agent.name) exited with status \(code). See \(agent.log.path)."
+                case .couldNotLaunch(let reason):
+                    lastError = "Couldn't run \(agent.name): \(reason)"
+                }
             }
         }
     }
@@ -769,7 +794,7 @@ final class AppModel {
     /// Asks Apple Intelligence for a title, tags and speaker names, saved as `suggestions.json`
     /// (after the final pass, which reset the speakers, so earlier suggestions are replaced).
     func suggest(for folder: URL) {
-        guard suggestWithAppleIntelligence, MeetingSuggester.isAvailable,
+        guard suggestWithAppleIntelligence, SuggestionProviders.selected.isAvailable,
               !suggestionQueue.contains(where: { Self.samePath($0, folder) }) else { return }
         suggestionQueue.append(folder)
         runSuggestions()
@@ -777,7 +802,7 @@ final class AppModel {
 
     /// Finished meetings that have never had suggestions, newest first.
     func suggestForEarlierMeetings() {
-        guard suggestWithAppleIntelligence, MeetingSuggester.isAvailable else { return }
+        guard suggestWithAppleIntelligence, SuggestionProviders.selected.isAvailable else { return }
         let store = store
         Task {
             let folders = await Task.detached(priority: .utility) {
@@ -803,9 +828,8 @@ final class AppModel {
             }
             // Not while it's being re-transcribed or deleted; it comes back after its final pass.
             guard !processing.contains(folder), !pendingDeletion.contains(folder) else { return }
-            let suggester = await Task.detached(priority: .utility) { MeetingSuggester(store: store, excluding: folder) }.value
             do {
-                try await suggester.suggest(folder: folder)
+                try await SuggestionProviders.selected.suggest(folder: folder, store: store) { _ in }
                 refreshRecentMeetings()
             } catch {
                 // Quietly: suggestions are a nicety, and the meeting is fine without them.

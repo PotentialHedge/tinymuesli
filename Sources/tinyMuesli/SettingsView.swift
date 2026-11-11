@@ -99,6 +99,7 @@ private struct RecordingSettings: View {
     var body: some View {
         @Bindable var model = model
         Form {
+            TranscriptionSettings(model: model)
             Section {
                 Picker("Language", selection: $model.language) {
                     Text("System Default").tag(String?.none)
@@ -114,7 +115,9 @@ private struct RecordingSettings: View {
                     }
                 }
             } footer: {
-                Text("Transcription runs on this Mac. You can switch the language during a meeting from the menu.")
+                Text(model.transcriptionProvider.transcribesLive
+                     ? "You can switch the language during a meeting from the menu."
+                     : "System Default lets the provider detect the language, even when it changes during a meeting.")
                     .settingsFooter()
             }
             Section {
@@ -168,6 +171,52 @@ private struct RecordingSettings: View {
     /// Meeting apps on this Mac, and any chosen before that aren't any more.
     private var apps: [MeetingApp] {
         MeetingApps.known.filter { AppIcon.icon(for: $0.name) != nil || model.alwaysRecord.contains($0.id) }
+    }
+}
+
+/// Which engine transcribes, and its API key if it's a cloud one.
+private struct TranscriptionSettings: View {
+    let model: AppModel
+    @State private var key = ""
+    @State private var hasKey = APIKeys.key(for: .elevenLabs) != nil
+
+    var body: some View {
+        @Bindable var model = model
+        Section {
+            Picker("Transcription", selection: $model.transcriptionProviderID) {
+                ForEach(TranscriptionProviders.all, id: \.id) { provider in
+                    Text(provider.name).tag(provider.id)
+                }
+            }
+            if model.transcriptionProviderID == TranscriptionProviders.elevenLabs.id {
+                LabeledContent {
+                    if hasKey {
+                        Button("Remove") {
+                            APIKeys.set(nil, for: .elevenLabs)
+                            hasKey = APIKeys.key(for: .elevenLabs) != nil
+                        }
+                    } else {
+                        HStack {
+                            SecureField("API Key", text: $key).labelsHidden().frame(width: 180)
+                            Button("Save") {
+                                APIKeys.set(key, for: .elevenLabs)
+                                key = ""
+                                hasKey = APIKeys.key(for: .elevenLabs) != nil
+                            }
+                            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                } label: {
+                    Text("ElevenLabs API Key")
+                    Text(hasKey ? "Saved in your keychain." : "From elevenlabs.io › Developers › API Keys. Kept in your keychain.")
+                }
+            }
+        } footer: {
+            Text(model.transcriptionProvider.isOnDevice
+                 ? "Transcription runs on this Mac."
+                 : "Each meeting's audio is uploaded to \(model.transcriptionProvider.name) after it ends, and the transcript appears then. Speakers are still told apart on this Mac.")
+                .settingsFooter()
+        }
     }
 }
 
@@ -254,6 +303,7 @@ private struct AssistantSettings: View {
                 Text("Adds tinyMuesli's MCP server, so the assistant can list, search and read your meetings. Nothing leaves your Mac until you ask it about one.")
                     .settingsFooter()
             }
+            AgentSettings(model: model)
             Section {
                 LabeledContent {
                     Button(copied ? "Copied" : "Copy Prompt") {
@@ -298,6 +348,44 @@ private struct AssistantSettings: View {
                     Image(systemName: "app.dashed")
                 }
             }
+        }
+    }
+}
+
+/// Agents that run after each meeting (see `MeetingAgents`), e.g. Claude Code with a prompt.
+private struct AgentSettings: View {
+    let model: AppModel
+
+    var body: some View {
+        @Bindable var model = model
+        let claude = ClaudeCodeAgent(binaryPath: "", prompt: "")
+        Section {
+            Toggle(isOn: Binding(
+                get: { model.enabledAgents.contains(claude.id) },
+                set: { on in
+                    if on { model.enabledAgents.insert(claude.id) } else { model.enabledAgents.remove(claude.id) }
+                }
+            )) {
+                Text("Ask Claude Code")
+                Text("Runs claude -p with tinyMuesli's tools and this prompt when a meeting has been transcribed. Uses your Claude Code login and settings.")
+            }
+            if model.enabledAgents.contains(claude.id) {
+                TextEditor(text: $model.claudeCodePrompt)
+                    .font(.body)
+                    .frame(minHeight: 80)
+                HStack {
+                    Button("Reset Prompt") { model.claudeCodePrompt = ClaudeCodeAgent.defaultPrompt }
+                        .disabled(model.claudeCodePrompt == ClaudeCodeAgent.defaultPrompt)
+                    Spacer()
+                    Button("Show Log") { NSWorkspace.shared.open(claude.log) }
+                        .disabled(!FileManager.default.fileExists(atPath: claude.log.path))
+                }
+            }
+        } header: {
+            Text("After Each Meeting")
+        } footer: {
+            Text("The meeting's id and folder are added to the prompt. An executable at ~/.config/tinymuesli/hooks/on-meeting-end runs too.")
+                .settingsFooter()
         }
     }
 }
