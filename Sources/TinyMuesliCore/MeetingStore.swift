@@ -1,10 +1,10 @@
 import Foundation
 
 /// The on-disk layout. The filesystem is the API, so this is the contract other tools rely on.
-/// New meetings go in `year/month/`; after that, meeting folders can be renamed, moved and
+/// New meetings go straight in the root; after that, meeting folders can be renamed, moved and
 /// grouped into folders of any depth (see `meetingFolders`):
 ///
-///     <root>/2026/11/2026-11-04 1030 Zoom/
+///     <root>/2026-11-04 1030 Zoom/
 ///         transcript.md     frontmatter + transcript
 ///         audio/mic.caf     raw tracks (deleted 24 h after transcribing unless audio is kept)
 ///         audio/system.caf
@@ -44,18 +44,14 @@ public struct MeetingStore: Sendable {
 
     /// Creates a fresh folder for a meeting, adding " (2)", " (3)"... on collisions.
     public func makeMeetingFolder(start: Date, appName: String?, calendar: Calendar = .current) throws -> URL {
-        let c = calendar.dateComponents([.year, .month], from: start)
-        let month = root
-            .appendingPathComponent(String(format: "%04d", c.year!), isDirectory: true)
-            .appendingPathComponent(String(format: "%02d", c.month!), isDirectory: true)
         let base = Self.folderName(start: start, appName: appName, calendar: calendar)
 
         let fm = FileManager.default
-        try fm.createDirectory(at: month, withIntermediateDirectories: true)
-        var candidate = month.appendingPathComponent(base, isDirectory: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        var candidate = root.appendingPathComponent(base, isDirectory: true)
         var n = 2
         while fm.fileExists(atPath: candidate.path) {
-            candidate = month.appendingPathComponent("\(base) (\(n))", isDirectory: true)
+            candidate = root.appendingPathComponent("\(base) (\(n))", isDirectory: true)
             n += 1
         }
         try fm.createDirectory(at: candidate, withIntermediateDirectories: false)
@@ -82,7 +78,7 @@ public struct MeetingStore: Sendable {
         recentMeetings(limit: .max)
     }
 
-    /// Every meeting folder under the root, at any depth: new meetings go in `year/month/`, but
+    /// Every meeting folder under the root, at any depth: new meetings go in the root, but
     /// they can be renamed, moved and grouped into folders of your own. A meeting folder is one
     /// with a `transcript.md` or an `audio/` folder; what's inside it isn't searched further.
     public func meetingFolders() -> [URL] {
@@ -129,8 +125,8 @@ public struct MeetingStore: Sendable {
         public var failed: [(folder: URL, reason: String)] = []
     }
 
-    /// Moves meeting folders into `destination`, keeping their path below the root (`year/month/`,
-    /// or folders of your own). A name that's already taken there gets " (2)", " (3)"... Folders
+    /// Moves meeting folders into `destination`, keeping their path below the root (folders of your
+    /// own, or `year/month/` from older versions). A name that's already taken there gets " (2)", " (3)"... Folders
     /// left empty are removed, up to the root.
     public func move(_ meetings: [URL], to destination: MeetingStore) -> MoveResult {
         let fm = FileManager.default

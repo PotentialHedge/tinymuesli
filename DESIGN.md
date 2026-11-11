@@ -47,19 +47,18 @@ tinyMuesli takes notes in meetings, so you remember them. It does that one job, 
 
 ```
 ~/Meetings/                      # configurable (menu: Meetings Folder…)
-  2026/11/
-    2026-11-04 1030 Zoom/
-      transcript.md              # YAML frontmatter + speaker-labelled text
-      transcript.json            # segments: start, end, speaker, track, text, confidence
-      speakers.json              # voice embedding per diarized speaker (for recognising people later)
-      suggestions.json           # title, tags and speaker names suggested by Apple Intelligence
-      notes.md                   # optional scratchpad (not yet)
-      audio/mic.caf              # mono AAC 32 kbps at the device's rate; only kept if retention is enabled
-      audio/system.caf
-                                 # (+ mic-2.caf etc. if a continued meeting changed device)
+  2026-11-04 1030 Zoom/
+    transcript.md              # YAML frontmatter + speaker-labelled text
+    transcript.json            # segments: start, end, speaker, track, text, confidence
+    speakers.json              # voice embedding per diarized speaker (for recognising people later)
+    suggestions.json           # title, tags and speaker names suggested by Apple Intelligence
+    notes.md                   # optional scratchpad (not yet)
+    audio/mic.caf              # mono AAC 32 kbps at the device's rate; only kept if retention is enabled
+    audio/system.caf
+                               # (+ mic-2.caf etc. if a continued meeting changed device)
 ```
 
-New meetings go in `year/month/`, but that's only where they start: rename meeting folders, move
+New meetings go straight in the meetings folder, but that's only where they start: rename meeting folders, move
 them, and group them into folders of your own at any depth (`Clients/Acme/Kickoff/`). A meeting is
 any folder with a `transcript.md` or an `audio/` folder (one being recorded before anyone spoke);
 folders inside a meeting, hidden folders, packages and symlinks aren't searched, and the walk stops

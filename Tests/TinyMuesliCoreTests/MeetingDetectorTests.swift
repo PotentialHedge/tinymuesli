@@ -160,7 +160,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         #expect(fm.fileExists(atPath: old.root.appendingPathComponent("Clients/Other").path))
     }
 
-    @Test func createsYearMonthFoldersAndAvoidsCollisions() throws {
+    @Test func createsFoldersInRootAndAvoidsCollisions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = MeetingStore(root: root)
@@ -169,7 +169,8 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         let first = try store.makeMeetingFolder(start: date, appName: "Zoom", calendar: calendar)
         let second = try store.makeMeetingFolder(start: date, appName: "Zoom", calendar: calendar)
 
-        #expect(first.path.hasSuffix("2026/11/2026-11-04 1030 Zoom"))
+        #expect(first.deletingLastPathComponent().lastPathComponent == root.lastPathComponent)
+        #expect(first.lastPathComponent == "2026-11-04 1030 Zoom")
         #expect(second.lastPathComponent == "2026-11-04 1030 Zoom (2)")
         for folder in [first, second] {
             try FileManager.default.createDirectory(at: folder.appendingPathComponent("audio"), withIntermediateDirectories: true)
@@ -177,18 +178,18 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         #expect(store.recentMeetings().map(\.lastPathComponent) == ["2026-11-04 1030 Zoom (2)", "2026-11-04 1030 Zoom"])
     }
 
-    @Test func movesMeetingsKeepingYearMonthAndAvoidingCollisions() throws {
+    @Test func movesMeetingsKeepingSubfoldersAndAvoidingCollisions() throws {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? fm.removeItem(at: base) }
         let old = MeetingStore(root: base.appendingPathComponent("old"))
         let new = MeetingStore(root: base.appendingPathComponent("new"))
         let nov = calendar.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 10, minute: 30))!
-        let oct = calendar.date(from: DateComponents(year: 2026, month: 10, day: 1, hour: 9, minute: 0))!
 
         let a = try old.makeMeetingFolder(start: nov, appName: "Zoom", calendar: calendar)
         try "hi".write(to: a.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
-        let b = try old.makeMeetingFolder(start: oct, appName: "Meet", calendar: calendar)
+        // Grouped into a folder of its own (or `year/month/` from older versions).
+        let b = old.root.appendingPathComponent("2026/10/2026-10-01 0900 Meet", isDirectory: true)
         // Recording, nothing said yet: only audio.
         try fm.createDirectory(at: b.appendingPathComponent("audio"), withIntermediateDirectories: true)
         let taken = try new.makeMeetingFolder(start: nov, appName: "Zoom", calendar: calendar)
@@ -196,19 +197,19 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
         // No transcript or audio: left alone, and not taken for a meeting.
         try fm.createDirectory(at: old.root.appendingPathComponent("Archive/11/x"), withIntermediateDirectories: true)
 
-        /// year/month/name: the temp dir is reached through a symlink, so full paths differ.
-        func relative(_ urls: [URL]) -> [String] { urls.map { $0.pathComponents.suffix(3).joined(separator: "/") } }
-        #expect(relative(old.allMeetings()) == relative([a, b]))
+        /// The temp dir is reached through a symlink, so compare paths below the root.
+        func relative(_ store: MeetingStore) -> [String] { store.allMeetings().map(store.relativePath(of:)) }
+        #expect(old.allMeetings().map(\.lastPathComponent) == [a, b].map(\.lastPathComponent))
         let result = old.move(old.allMeetings(), to: new)
 
         #expect(result.moved == 2 && result.failed.isEmpty)
         #expect(old.allMeetings().isEmpty)
         #expect(!fm.fileExists(atPath: old.root.appendingPathComponent("2026").path))
         #expect(fm.fileExists(atPath: old.root.appendingPathComponent("Archive").path))
-        #expect(relative(new.allMeetings()) == [
-            "2026/11/2026-11-04 1030 Zoom (2)", "2026/11/2026-11-04 1030 Zoom", "2026/10/2026-10-01 0900 Meet",
+        #expect(relative(new) == [
+            "2026-11-04 1030 Zoom (2)", "2026-11-04 1030 Zoom", "2026/10/2026-10-01 0900 Meet",
         ])
-        let moved = new.root.appendingPathComponent("2026/11/2026-11-04 1030 Zoom (2)/transcript.md")
+        let moved = new.root.appendingPathComponent("2026-11-04 1030 Zoom (2)/transcript.md")
         #expect(try String(contentsOf: moved, encoding: .utf8) == "hi")
     }
 
