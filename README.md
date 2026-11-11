@@ -1,6 +1,6 @@
 # tinyMuesli
 
-Local, private meeting notes for macOS. [tinymuesli.com](https://tinymuesli.com) · [DESIGN.md](DESIGN.md)
+Local, private meeting notes for macOS. [tinymuesli.potentialhedge.com](https://tinymuesli.potentialhedge.com) · [DESIGN.md](DESIGN.md)
 
 Formerly called Muesli. The first launch of tinyMuesli copies Muesli's settings and
 `~/.config/muesli` over. macOS asks for microphone and system audio access again, and agent MCP
@@ -172,8 +172,7 @@ Each rebuild changes the ad-hoc signature, so macOS asks for permissions again. 
 
 ## Website
 
-`site/` is [tinymuesli.com](https://tinymuesli.com), a single static page on Cloudflare Pages:
-
-```sh
-npx wrangler pages deploy site --project-name tinymuesli
-```
+The homepage, [tinymuesli.potentialhedge.com](https://tinymuesli.potentialhedge.com), lives in its own
+repository, [PotentialHedge/tinymuesli-site](https://github.com/PotentialHedge/tinymuesli-site), and
+deploys to GitHub Pages on every push. Its Download button links to the latest release's
+`tinyMuesli.dmg`. `site/` is the older single-page version, kept for its logo sketches.
