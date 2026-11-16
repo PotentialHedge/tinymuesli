@@ -176,18 +176,7 @@ struct MeetingDetails: View {
                 Text("No one has spoken yet.").foregroundStyle(.secondary)
             }
             ForEach(transcript.speakers, id: \.self) { speaker in
-                SpeakerRow(
-                    speaker: speaker,
-                    stats: stats(for: speaker),
-                    color: speakerColors || speaker == SpeakerLabel.me ? color(speaker) : .secondary,
-                    suggestion: suggestions.first { $0.speaker == speaker },
-                    knownNames: knownNames.filter { !transcript.speakers.contains($0) },
-                    canRename: canRename,
-                    rename: { name in perform { try MeetingEditor(folder: folder).rename(speaker: speaker, to: name) } },
-                    mergeTargets: transcript.speakers.filter { $0 != speaker && ($0 != SpeakerLabel.me || micOnly(speaker)) },
-                    merge: { target in pendingMerge = (speaker, target) }
-                )
-                .id(speaker)
+                speakerRow(speaker)
             }
         } header: {
             Text("Speakers")
@@ -198,6 +187,27 @@ struct MeetingDetails: View {
                 Text("Speakers can be named once the meeting has been transcribed.")
             }
         }
+    }
+
+    private func speakerRow(_ speaker: String) -> some View {
+        SpeakerRow(
+            speaker: speaker,
+            stats: stats(for: speaker),
+            color: speakerColors || speaker == SpeakerLabel.me ? color(speaker) : .secondary,
+            suggestion: suggestions.first { $0.speaker == speaker },
+            knownNames: knownNames.filter { !transcript.speakers.contains($0) },
+            canRename: canRename,
+            rename: { name in
+                perform {
+                    let editor = MeetingEditor(folder: folder)
+                    if speaker == SpeakerLabel.me { try editor.renameMe(to: name) } else { try editor.rename(speaker: speaker, to: name) }
+                }
+            },
+            mergeTargets: transcript.speakers.filter { $0 != speaker && ($0 != SpeakerLabel.me || micOnly(speaker)) },
+            merge: { target in pendingMerge = (speaker, target) },
+            makeMe: { perform { try MeetingEditor(folder: folder).makeMe(speaker) } }
+        )
+        .id(speaker)
     }
 
     /// Everything they said came through the microphone: a voice split off "Me", which can go back.
@@ -267,12 +277,12 @@ private struct SpeakerRow: View {
     /// The other speakers this one can be merged into ("Me" only for voices split off the microphone).
     let mergeTargets: [String]
     let merge: (String) -> Void
+    /// Makes this speaker "Me".
+    let makeMe: () -> Void
     @State private var name = ""
     @FocusState private var focused: Bool
     /// Set once renamed, so losing focus or disappearing afterwards doesn't rename again.
     @State private var renamed = false
-    /// What "Me" is called in the app. Only a display name: the files keep "Me".
-    @AppStorage("meName") private var meName = SpeakerLabel.me
 
     private var isMe: Bool { speaker == SpeakerLabel.me }
 
@@ -280,12 +290,7 @@ private struct SpeakerRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 10, height: 10)
-                if isMe {
-                    TextField("Name", text: $meName, prompt: Text(SpeakerLabel.me))
-                        .labelsHidden()
-                        .textFieldStyle(.plain)
-                        .onSubmit { if MeetingEditor.clean(meName).isEmpty { meName = SpeakerLabel.me } }
-                } else if !canRename {
+                if !canRename {
                     Text(speaker)
                 } else {
                     TextField("Name", text: $name, prompt: Text(speaker))
@@ -302,7 +307,7 @@ private struct SpeakerRow: View {
                         }
                 }
                 Spacer()
-                Text(isMe ? "Microphone" : stats)
+                Text(stats)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if canMerge {
@@ -316,6 +321,14 @@ private struct SpeakerRow: View {
                     .fixedSize()
                     .help("Merge \(speaker) into another speaker")
                 }
+            }
+            if !isMe, canRename {
+                Button("This is Me", action: makeMe)
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 18)
+                    .help("Show \(speaker) as you: on the right, in blue")
             }
             if let suggestion, canRename {
                 HStack(spacing: 6) {
