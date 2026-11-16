@@ -210,6 +210,8 @@ final class MeetingSession {
 
 /// Me's bubbles: light blue with black text, so they sit well beside the other speakers' tints.
 let meColor = Color(red: 0.73, green: 0.86, blue: 1.0)
+/// Me's name above their messages: the same blue, dark enough to read.
+let meTextColor = Color(red: 0.30, green: 0.56, blue: 0.92)
 
 /// Me is always light blue; everyone else grey, or a colour each when `colored`.
 func speakerColor(_ speaker: String, speakers: [String], colored: Bool) -> Color {
@@ -1268,7 +1270,7 @@ private struct Bubble: View {
                             otherName = message.speaker
                             renaming = true
                         } label: {
-                            Text(message.speaker).italic(message.isMe)
+                            Text(message.speaker)
                         }
                         .buttonStyle(.plain)
                         .help("Rename \(message.speaker) in this meeting")
@@ -1279,12 +1281,11 @@ private struct Bubble: View {
                             }
                         }
                     } else {
-                        Text(message.speaker).italic(message.isMe)
+                        Text(message.speaker)
                     }
                 }
                 .font(.caption.weight(.semibold))
-                // Me's light blue is too faint for text.
-                .foregroundStyle(color == .gray || message.isMe ? Color.secondary : color)
+                .foregroundStyle(message.isMe ? meTextColor : color == .gray ? Color.secondary : color)
                 .padding(.horizontal, 12)
             }
             HStack(alignment: .bottom, spacing: 6) {

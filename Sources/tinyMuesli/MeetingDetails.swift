@@ -324,7 +324,7 @@ private struct SpeakerRow: View {
                 }
             }
             if !isMe, canRename {
-                Button("This is Me", action: makeMe)
+                Button(action: makeMe) { Text("This is \(Text("Me").italic())") }
                     .controlSize(.small)
                     .padding(.leading, 18)
                     .help("Show \(speaker) as you: on the right, in blue")
