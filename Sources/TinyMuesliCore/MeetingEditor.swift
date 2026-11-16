@@ -61,6 +61,32 @@ public struct MeetingEditor: Sendable {
         try relabel(old, to: new)
     }
 
+    /// Makes `speaker` the user: they become "Me" (right side, blue). Whoever was Me until now
+    /// becomes the next free "Speaker n", so they stay apart.
+    public func makeMe(_ speaker: String) throws {
+        guard speaker != SpeakerLabel.me else { return }
+        let speakers = try readMetadata().speakers
+        guard speakers.contains(speaker) else { throw EditError.unknownSpeaker(speaker) }
+        if speakers.contains(SpeakerLabel.me) {
+            let numbers = speakers.compactMap { name -> Int? in
+                guard let match = name.wholeMatch(of: /Speaker (\d+)/) else { return nil }
+                return Int(match.1)
+            }
+            try relabel(SpeakerLabel.me, to: "Speaker \((numbers.max() ?? 0) + 1)")
+        }
+        try relabel(speaker, to: SpeakerLabel.me)
+    }
+
+    /// Gives "Me" a name, so nobody in the meeting is the user any more (naming them like another
+    /// speaker merges the two, as with `rename`).
+    public func renameMe(to new: String) throws {
+        let new = Self.clean(new)
+        guard !new.isEmpty else { throw EditError.invalidName }
+        guard new != SpeakerLabel.me else { return }
+        guard try readMetadata().speakers.contains(SpeakerLabel.me) else { throw EditError.unknownSpeaker(SpeakerLabel.me) }
+        try relabel(SpeakerLabel.me, to: new)
+    }
+
     /// Renames without the checks; `new` may be "Me" (see `merge`).
     private func relabel(_ old: String, to new: String) throws {
         var metadata = try readMetadata()

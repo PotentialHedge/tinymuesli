@@ -66,6 +66,23 @@ import Testing
         #expect(throws: MeetingEditor.EditError.reservedName("Me")) { try editor.rename(speaker: "Speaker 1", to: "Me") }
     }
 
+    @Test func anySpeakerCanBeMadeMe() throws {
+        let folder = try makeMeeting()
+        let editor = MeetingEditor(folder: folder)
+        try editor.makeMe("Speaker 2")
+        var chat = ChatTranscript.load(folder: folder)
+        #expect(chat.speakers == ["Speaker 3", "Speaker 1", "Me"])
+        #expect(chat.messages.last?.isMe == true)
+        #expect(chat.messages.first?.isMe == false)
+        // Naming Me leaves nobody as Me.
+        try editor.renameMe(to: "Ann")
+        chat = ChatTranscript.load(folder: folder)
+        #expect(chat.speakers == ["Speaker 3", "Speaker 1", "Ann"])
+        #expect(chat.messages.allSatisfy { !$0.isMe })
+        try editor.makeMe("Ann")
+        #expect(ChatTranscript.load(folder: folder).speakers == ["Speaker 3", "Speaker 1", "Me"])
+    }
+
     @Test func mergesIntoAnExistingSpeakerOnly() throws {
         let folder = try makeMeeting(voices: ["Speaker 1": [1, 0], "Speaker 2": [0, 1]])
         let editor = MeetingEditor(folder: folder)
