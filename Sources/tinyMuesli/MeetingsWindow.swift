@@ -208,9 +208,12 @@ final class MeetingSession {
     }
 }
 
-/// Me is always the accent colour; everyone else grey, or a colour each when `colored`.
+/// Me's bubbles: light blue with black text, so they sit well beside the other speakers' tints.
+let meColor = Color(red: 0.73, green: 0.86, blue: 1.0)
+
+/// Me is always light blue; everyone else grey, or a colour each when `colored`.
 func speakerColor(_ speaker: String, speakers: [String], colored: Bool) -> Color {
-    if speaker == SpeakerLabel.me { return .accentColor }
+    if speaker == SpeakerLabel.me { return meColor }
     guard colored else { return .gray }
     let palette: [Color] = [.orange, .green, .purple, .pink, .teal, .indigo, .brown, .mint, .cyan, .red]
     let index = speakers.filter { $0 != SpeakerLabel.me }.firstIndex(of: speaker) ?? 0
@@ -819,6 +822,98 @@ private struct ChatView: View {
 
     private var query: String { highlight.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private var isDone: Bool { transcript.metadata?.status == .done }
+
+    @ViewBuilder private func messageRow(_ message: ChatTranscript.Message, previous: ChatTranscript.Message?) -> some View {
+        if let divider = divider(before: message, previous: previous) {
+            Text(divider)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 18)
+                .padding(.bottom, 6)
+        }
+        Bubble(
+            message: message,
+            color: color(for: message.speaker),
+            startsGroup: previous?.speaker != message.speaker || divider(before: message, previous: previous) != nil,
+            showsSpeakerName: !message.isMe && transcript.speakers.count > 1,
+            suggestion: transcript.metadata?.status == .done ? suggestion(for: message.speaker) : nil,
+            confirm: { rename(message.speaker, to: $0) },
+            canRename: isDone,
+            highlight: query,
+            isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id,
+            showsTime: hoveredMessage == message.id
+        )
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.chatSpace)) } action: { frame in
+            bubbleFrames.frames[message.id] = frame
+        }
+        .onDisappear { bubbleFrames.frames[message.id] = nil }
+        .id(message.id)
+    }
+
+    @ToolbarContentBuilder private var chatToolbar: some ToolbarContent {
+        if !query.isEmpty {
+            ToolbarItem {
+                let count = matchIDs.count
+                ControlGroup {
+                    Button { currentMatch = (currentMatch - 1 + count) % count } label: {
+                        Label("Previous Match", systemImage: "chevron.up")
+                    }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    Button { currentMatch = (currentMatch + 1) % count } label: {
+                        Label("Next Match", systemImage: "chevron.down")
+                    }
+                    .keyboardShortcut("g", modifiers: .command)
+                } label: {
+                    Text("Matches")
+                }
+                .disabled(count == 0)
+                .help(count == 0 ? "No matches in this meeting" : "Match \(min(currentMatch, count - 1) + 1) of \(count)")
+            }
+        }
+        // Only the assistants that have tinyMuesli's MCP server, since that's how they read the meeting.
+        ToolbarItemGroup {
+            ForEach(chatServices, id: \.self) { service in
+                Button { openChat(in: service) } label: {
+                    Label {
+                        Text("Chat in \(service.name)")
+                    } icon: {
+                        if let icon = Self.appIcon(for: service) {
+                            Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                        } else {
+                            Image(systemName: "bubble.left.and.text.bubble.right")
+                        }
+                    }
+                }
+                .help("Chat about this meeting in \(service.name), which reads it through tinyMuesli")
+            }
+        }
+        if transcript.metadata?.status == .done {
+            ToolbarItem {
+                ShareButton(folder: folder)
+                    .help("Share this meeting as a web page, which anyone with tinyMuesli can add to their meetings")
+            }
+        }
+        ToolbarItem {
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
+            } label: {
+                Label("Show in Finder", systemImage: "folder")
+            }
+            .help("Show the transcript files in Finder")
+        }
+        ToolbarItem {
+            Button {
+                withAnimation(motion(.default)) { showsDetails.toggle() }
+            } label: {
+                Label("Details", systemImage: showsDetails ? "info.circle.fill" : "info.circle")
+            }
+            .help(showsDetails ? "Hide details" : "Show tags and speakers")
+            .keyboardShortcut("i", modifiers: .command)
+        }
+    
+    }
+
     /// Messages containing the search, in order.
     private var matchIDs: [Int] {
         guard !query.isEmpty else { return [] }
@@ -834,30 +929,7 @@ private struct ChatView: View {
                     header
                     let messages = transcript.messages
                     ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                        let previous = index > 0 ? messages[index - 1] : nil
-                        if let divider = divider(before: message, previous: previous) {
-                            Text(divider)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 18)
-                                .padding(.bottom, 6)
-                        }
-                        Bubble(
-                            message: message,
-                            color: color(for: message.speaker),
-                            startsGroup: previous?.speaker != message.speaker || divider(before: message, previous: previous) != nil,
-                            showsSpeakerName: !message.isMe && transcript.speakers.count > 1,
-                            suggestion: transcript.metadata?.status == .done ? suggestion(for: message.speaker) : nil,
-                            confirm: { rename(message.speaker, to: $0) },
-                            highlight: query,
-                            isCurrentMatch: matchIDs.indices.contains(currentMatch) && matchIDs[currentMatch] == message.id,
-                            showsTime: hoveredMessage == message.id
-                        )
-                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.chatSpace)) } action: { frame in
-                            bubbleFrames.frames[message.id] = frame
-                        }
-                        .onDisappear { bubbleFrames.frames[message.id] = nil }
-                        .id(message.id)
+                        messageRow(message, previous: index > 0 ? messages[index - 1] : nil)
                     }
                     if transcript.messages.isEmpty {
                         Text(isLive ? "Nothing said yet." : "This meeting has no transcript.")
@@ -907,67 +979,7 @@ private struct ChatView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
-        .toolbar {
-            if !query.isEmpty {
-                ToolbarItem {
-                    let count = matchIDs.count
-                    ControlGroup {
-                        Button { currentMatch = (currentMatch - 1 + count) % count } label: {
-                            Label("Previous Match", systemImage: "chevron.up")
-                        }
-                        .keyboardShortcut("g", modifiers: [.command, .shift])
-                        Button { currentMatch = (currentMatch + 1) % count } label: {
-                            Label("Next Match", systemImage: "chevron.down")
-                        }
-                        .keyboardShortcut("g", modifiers: .command)
-                    } label: {
-                        Text("Matches")
-                    }
-                    .disabled(count == 0)
-                    .help(count == 0 ? "No matches in this meeting" : "Match \(min(currentMatch, count - 1) + 1) of \(count)")
-                }
-            }
-            // Only the assistants that have tinyMuesli's MCP server, since that's how they read the meeting.
-            ForEach(chatServices, id: \.self) { service in
-                ToolbarItem {
-                    Button { openChat(in: service) } label: {
-                        Label {
-                            Text("Chat in \(service.name)")
-                        } icon: {
-                            if let icon = Self.appIcon(for: service) {
-                                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
-                            } else {
-                                Image(systemName: "bubble.left.and.text.bubble.right")
-                            }
-                        }
-                    }
-                    .help("Chat about this meeting in \(service.name), which reads it through tinyMuesli")
-                }
-            }
-            if transcript.metadata?.status == .done {
-                ToolbarItem {
-                    ShareButton(folder: folder)
-                        .help("Share this meeting as a web page, which anyone with tinyMuesli can add to their meetings")
-                }
-            }
-            ToolbarItem {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent(MeetingFiles.transcript)])
-                } label: {
-                    Label("Show in Finder", systemImage: "folder")
-                }
-                .help("Show the transcript files in Finder")
-            }
-            ToolbarItem {
-                Button {
-                    withAnimation(motion(.default)) { showsDetails.toggle() }
-                } label: {
-                    Label("Details", systemImage: showsDetails ? "info.circle.fill" : "info.circle")
-                }
-                .help(showsDetails ? "Hide details" : "Show tags and speakers")
-                .keyboardShortcut("i", modifiers: .command)
-            }
-        }
+        .toolbar { chatToolbar }
         .task(id: "\(folder.path)|\(transcript.metadata?.status.rawValue ?? "")|\(transcript.speakers.joined(separator: "|"))") {
             let editor = MeetingEditor(folder: folder)
             let count = await Task.detached(priority: .userInitiated) { editor.micVoices?.voices.count ?? 0 }.value
@@ -1217,11 +1229,14 @@ private struct Bubble: View {
     /// Shown as "Maybe Ann" with a button that confirms the name.
     let suggestion: SpeakerSuggestion?
     let confirm: (String) -> Void
+    /// The name above a run can be clicked to rename the speaker (once the meeting is done).
+    let canRename: Bool
     let highlight: String
     let isCurrentMatch: Bool
     let showsTime: Bool
     @State private var namingOther = false
     @State private var otherName = ""
+    @State private var renaming = false
 
     var body: some View {
         VStack(alignment: message.isMe ? .trailing : .leading, spacing: 2) {
@@ -1247,6 +1262,19 @@ private struct Bubble: View {
                                 confirm(name)
                             }
                         }
+                    } else if canRename {
+                        Button(message.speaker) {
+                            otherName = message.speaker
+                            renaming = true
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rename \(message.speaker) in this meeting")
+                        .popover(isPresented: $renaming, arrowEdge: .bottom) {
+                            OtherNameForm(speaker: message.speaker, name: $otherName) { name in
+                                renaming = false
+                                if name != message.speaker { confirm(name) }
+                            }
+                        }
                     } else {
                         Text(message.speaker)
                     }
@@ -1261,7 +1289,7 @@ private struct Bubble: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .foregroundStyle(message.isMe ? Color.white : Color.primary)
+                    .foregroundStyle(message.isMe ? Color.black : Color.primary)
                     .background(
                         message.isMe ? AnyShapeStyle(color) : AnyShapeStyle(color.opacity(0.14)),
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous)

@@ -271,6 +271,8 @@ private struct SpeakerRow: View {
     @FocusState private var focused: Bool
     /// Set once renamed, so losing focus or disappearing afterwards doesn't rename again.
     @State private var renamed = false
+    /// What "Me" is called in the app. Only a display name: the files keep "Me".
+    @AppStorage("meName") private var meName = SpeakerLabel.me
 
     private var isMe: Bool { speaker == SpeakerLabel.me }
 
@@ -278,8 +280,13 @@ private struct SpeakerRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 10, height: 10)
-                if isMe || !canRename {
-                    Text(isMe ? "Me" : speaker)
+                if isMe {
+                    TextField("Name", text: $meName, prompt: Text(SpeakerLabel.me))
+                        .labelsHidden()
+                        .textFieldStyle(.plain)
+                        .onSubmit { if MeetingEditor.clean(meName).isEmpty { meName = SpeakerLabel.me } }
+                } else if !canRename {
+                    Text(speaker)
                 } else {
                     TextField("Name", text: $name, prompt: Text(speaker))
                         .labelsHidden()
