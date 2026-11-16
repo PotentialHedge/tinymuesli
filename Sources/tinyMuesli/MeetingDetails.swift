@@ -324,9 +324,7 @@ private struct SpeakerRow: View {
             }
             if !isMe, canRename {
                 Button("This is Me", action: makeMe)
-                    .buttonStyle(.plain)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .controlSize(.small)
                     .padding(.leading, 18)
                     .help("Show \(speaker) as you: on the right, in blue")
             }
