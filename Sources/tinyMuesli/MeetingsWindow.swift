@@ -836,7 +836,7 @@ private struct ChatView: View {
             message: message,
             color: color(for: message.speaker),
             startsGroup: previous?.speaker != message.speaker || divider(before: message, previous: previous) != nil,
-            showsSpeakerName: !message.isMe && transcript.speakers.count > 1,
+            showsSpeakerName: transcript.speakers.count > 1,
             suggestion: transcript.metadata?.status == .done ? suggestion(for: message.speaker) : nil,
             confirm: { rename(message.speaker, to: $0) },
             canRename: isDone,
@@ -1101,7 +1101,8 @@ private struct ChatView: View {
     /// Confirming a "Maybe Ann" in the chat.
     private func rename(_ speaker: String, to name: String) {
         do {
-            try MeetingEditor(folder: folder).rename(speaker: speaker, to: name)
+            let editor = MeetingEditor(folder: folder)
+            if speaker == SpeakerLabel.me { try editor.renameMe(to: name) } else { try editor.rename(speaker: speaker, to: name) }
         } catch {
             renameError = error.localizedDescription
         }
@@ -1263,9 +1264,11 @@ private struct Bubble: View {
                             }
                         }
                     } else if canRename {
-                        Button(message.speaker) {
+                        Button {
                             otherName = message.speaker
                             renaming = true
+                        } label: {
+                            Text(message.speaker).italic(message.isMe)
                         }
                         .buttonStyle(.plain)
                         .help("Rename \(message.speaker) in this meeting")
@@ -1276,11 +1279,12 @@ private struct Bubble: View {
                             }
                         }
                     } else {
-                        Text(message.speaker)
+                        Text(message.speaker).italic(message.isMe)
                     }
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(color == .gray ? Color.secondary : color)
+                // Me's light blue is too faint for text.
+                .foregroundStyle(color == .gray || message.isMe ? Color.secondary : color)
                 .padding(.horizontal, 12)
             }
             HStack(alignment: .bottom, spacing: 6) {

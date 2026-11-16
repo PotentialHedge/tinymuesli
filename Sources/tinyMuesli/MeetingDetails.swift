@@ -291,11 +291,12 @@ private struct SpeakerRow: View {
             HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 10, height: 10)
                 if !canRename {
-                    Text(speaker)
+                    Text(speaker).italic(isMe)
                 } else {
                     TextField("Name", text: $name, prompt: Text(speaker))
                         .labelsHidden()
                         .textFieldStyle(.plain)
+                        .italic(isMe)
                         .focused($focused)
                         .onSubmit(commit)
                         .onChange(of: focused) { _, focused in if !focused { commit() } }
