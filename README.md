@@ -84,6 +84,16 @@ tinymuesli update "<meeting id>" --title "Q4 roadmap" --tags roadmap,acme --spea
 `list`, `show`, `search`, `speakers` and `update` also take `--json`. `update` changes only what you
 give it: `--title ""` removes the title, `--tags ""` removes the tags, and `--speaker` can be repeated.
 
+**Checking that the mic survives a device switch.** If the input changes mid-meeting (AirPods
+connect, another input is chosen, the call app reconfigures the mic), the mic is captured again from
+the new input, the gap becomes silence, and the log (`log stream --predicate 'subsystem ==
+"com.tinymuesli.tinyMuesli" AND category == "mic"'`) says so. To try it, start
+`tinymuesli record --seconds 30 --no-transcribe --root /tmp/mictest`, switch the input in System
+Settings › Sound › Input (or connect AirPods) a few times while it runs, then check that
+`Captured mic …s` is the full length (about 30 s plus the few seconds the mic takes to start).
+`afinfo` gives each file's duration; a track that changed sample rate continues in `mic-2.caf`
+(the parts add up). In a meeting with audio playing, `mic` and `system` come out the same length.
+
 `open "tinymuesli://meeting?id=<meeting id>"` (with the id URL-encoded) opens that meeting in the
 Meetings window, launching tinyMuesli if it isn't running. The [Raycast extension](raycast/) uses
 both.

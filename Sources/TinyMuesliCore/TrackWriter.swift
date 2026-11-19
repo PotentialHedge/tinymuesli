@@ -39,6 +39,9 @@ public final class TrackWriter: @unchecked Sendable {
     /// Written to the file in batches, so the tee gets sensible buffers rather than one per slot.
     private var pending: AVAudioPCMBuffer?
     private let gate: SpeechGate?
+    /// Any audio has arrived (on `queue`). A track that never got any isn't padded at the end, so
+    /// it stays empty and "nothing was captured" can be told apart.
+    private var receivedAudio = false
     private static let batchFrames: AVAudioFrameCount = 4096
 
     /// Guards the two values below, which the queue updates and anyone may read. Never taken by `write`.
@@ -183,12 +186,8 @@ public final class TrackWriter: @unchecked Sendable {
     }
 
     private func add(_ samples: UnsafeBufferPointer<Float>, hostTime: UInt64?) throws {
-        let queued = AVAudioFramePosition(pending?.frameLength ?? 0) + (gate?.heldFrames ?? 0)
-        if let missing = Self.missingFrames(at: hostTime, clockStart: clockStart, written: startFrame + framesWritten + queued,
-                                            sampleRate: sampleRate) {
-            try flush()
-            try writeSilence(frames: missing)
-        }
+        receivedAudio = true
+        try fillGap(before: hostTime)
         if let current = pending, current.frameLength + AVAudioFrameCount(samples.count) > current.frameCapacity {
             try flush()
         }
@@ -202,6 +201,16 @@ public final class TrackWriter: @unchecked Sendable {
         }
         batch.frameLength += AVAudioFrameCount(samples.count)
         pending = batch
+    }
+
+    /// Writes silence up to `hostTime` if the track has fallen behind it (see `missingFrames`).
+    private func fillGap(before hostTime: UInt64?) throws {
+        let queued = AVAudioFramePosition(pending?.frameLength ?? 0) + (gate?.heldFrames ?? 0)
+        if let missing = Self.missingFrames(at: hostTime, clockStart: clockStart, written: startFrame + framesWritten + queued,
+                                            sampleRate: sampleRate) {
+            try flush()
+            try writeSilence(frames: missing)
+        }
     }
 
     private func flush() throws {
@@ -244,12 +253,18 @@ public final class TrackWriter: @unchecked Sendable {
     }
 
     /// Writes out everything queued, so call it after the audio stops. Later writes are ignored.
-    public func close() {
+    /// `endingAt`: when the recording ended (host time). If the input delivered nothing for a while
+    /// before that (e.g. the mic stopped), the track is padded with silence up to it, so it's as long
+    /// as the other tracks. Needs a `clockStart`, and some audio received (or an earlier file):
+    /// a track that never got any stays empty.
+    public func close(endingAt end: UInt64? = nil) {
         guard !isClosed.exchange(true, ordering: .acquiringAndReleasing) else { return }
         timer.cancel()
         queue.sync {
             drain()
             do {
+                if receivedAudio || startFrame > 0 { try fillGap(before: end) }
+                try flush()
                 for decided in gate?.flush() ?? [] { try write(decided) }
             } catch {
                 lock.withLock { _lastError = _lastError ?? error }

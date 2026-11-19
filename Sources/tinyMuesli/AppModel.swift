@@ -435,6 +435,8 @@ final class AppModel {
                     guard let self, let session else { return }
                     self.suggest(suggestion, in: session)
                 }
+                // E.g. the mic stopped and was restarted: say so now, not only when the meeting ends.
+                session.onWarning = { [weak self] warning in self?.lastError = warning }
                 try session.start()
                 lastError = session.warnings.first
                 muteMe = false

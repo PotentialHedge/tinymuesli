@@ -158,6 +158,7 @@ enum CLI {
             let speechDetector = Settings.skipSilence ? wait { try? await SileroSpeechDetector.load() } : nil
             let session = try RecordingSession(store: store, app: nil, transcriber: provider.transcribesLive ? transcriber : nil,
                                                speechDetector: speechDetector)
+            session.onWarning = { print("warning: \($0)") }
             try session.start()
             session.warnings.forEach { print("warning: \($0)") }
             print("Recording for \(Int(seconds))s into \(session.folder.path)")

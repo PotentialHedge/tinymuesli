@@ -107,5 +107,6 @@ final class SegmentedTrack {
     /// Seconds of track so far, across files.
     var seconds: Double { writer.endSeconds }
 
-    func close() { writer.close() }
+    /// See `TrackWriter.close(endingAt:)`.
+    func close(endingAt end: UInt64? = nil) { writer.close(endingAt: end) }
 }

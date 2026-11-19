@@ -21,6 +21,12 @@ public final class RecordingSession {
     public private(set) var pausedAt: Date?
     /// Non-fatal problems, e.g. system audio failed but the mic is recording.
     public private(set) var warnings: [String] = []
+    /// Called with each warning added while recording (e.g. the mic stopped and was restarted).
+    public var onWarning: ((String) -> Void)?
+    /// Host time when capture was paused, so a stop while paused ends the tracks there.
+    private var pausedHostTime: UInt64?
+    /// The mic is down and couldn't be restarted yet (so that's reported once, not every retry).
+    private var micDown = false
 
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
@@ -117,6 +123,7 @@ public final class RecordingSession {
     public func start() throws {
         try FileManager.default.createDirectory(at: audioFolder, withIntermediateDirectories: true)
         live.update { _ in }
+        mic.onEvent = { [weak self] in self?.handle($0) }
 
         // Both tracks are written against this clock, so their timelines line up.
         let clockStart = mach_absolute_time()
@@ -147,6 +154,7 @@ public final class RecordingSession {
         mic.pause()
         system.pause()
         pausedAt = now
+        pausedHostTime = mach_absolute_time()
         live.update { $0.end = now }
     }
 
@@ -164,13 +172,17 @@ public final class RecordingSession {
         }
         warnings += errors
         pausedAt = nil
+        pausedHostTime = nil
         live.update { $0.end = nil }
     }
 
     public func stop(now: Date = .now) {
         let now = pausedAt ?? now
-        mic.stop()
-        system.stop()
+        // Both tracks run to the end, even one whose input had stopped delivering audio.
+        let end = pausedHostTime ?? mach_absolute_time()
+        mic.stop(endingAt: end)
+        system.stop(endingAt: end)
+        onWarning = nil
         if system.secondsWritten == 0, !warnings.contains(where: { $0.hasPrefix("System audio not recording") }) {
             // The tap started but never delivered a buffer: usually permission, so say where to look.
             warnings.append("No system audio was captured, so other participants are missing. Check System Settings → Privacy & Security → Screen & System Audio Recording.")
@@ -179,6 +191,30 @@ public final class RecordingSession {
             $0.end = now
             $0.status = .recorded
         }
+    }
+
+    private func handle(_ event: MicEvent) {
+        let meetingTime = { (silent: Double) in
+            TranscriptRenderer.timestamp(max(0, Date.now.timeIntervalSince(self.startedAt) - silent))
+        }
+        switch event {
+        case .restarted(_, let silent, let device):
+            let wasDown = micDown
+            micDown = false
+            // A device switch costs a moment; only a real gap in your side of the meeting is worth saying.
+            guard wasDown || silent >= MicWatchdog.stallSeconds else { return }
+            let on = device.map { " on \($0)" } ?? ""
+            warn("The microphone stopped at \(meetingTime(silent)) and is recording again\(on). About \(Int(silent.rounded())) s of your side is missing.")
+        case .restartFailed(let reason, let silent, let error):
+            guard !micDown else { return }
+            micDown = true
+            warn("The microphone stopped at \(meetingTime(silent)) (\(reason.rawValue)) and couldn't be restarted yet: \(error). tinyMuesli keeps trying.")
+        }
+    }
+
+    private func warn(_ warning: String) {
+        warnings.append(warning)
+        onWarning?(warning)
     }
 
     /// The language each track is being transcribed in now.

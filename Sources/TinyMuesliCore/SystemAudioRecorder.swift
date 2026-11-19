@@ -122,8 +122,10 @@ public final class SystemAudioRecorder {
         }
     }
 
-    public func stop() {
+    /// `endingAt`: when the recording ended (host time); if nothing was playing at the end (the tap
+    /// delivers nothing then), the track is padded with silence up to it.
+    public func stop(endingAt end: UInt64? = nil) {
         pause()
-        track?.close()
+        track?.close(endingAt: end)
     }
 }
