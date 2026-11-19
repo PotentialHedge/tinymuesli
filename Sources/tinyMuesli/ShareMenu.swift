@@ -13,6 +13,7 @@ private let log = Logger(subsystem: "com.tinymuesli", category: "share")
 final class MeetingSharer: NSObject, @preconcurrency NSSharingServicePickerDelegate {
     static let shared = MeetingSharer()
     private var meeting: SharedMeeting?
+    private var page: URL?
 
     /// Shows the share menu next to `rect` in `view`.
     func share(folder: URL, relativeTo rect: NSRect, of view: NSView, preferredEdge edge: NSRectEdge) {
@@ -20,6 +21,7 @@ final class MeetingSharer: NSObject, @preconcurrency NSSharingServicePickerDeleg
             let meeting = try SharedMeeting(folder: folder)
             let page = try meeting.writeTemporaryPage()
             self.meeting = meeting
+            self.page = page
             let picker = NSSharingServicePicker(items: [page])
             picker.delegate = self
             picker.show(relativeTo: rect, of: view, preferredEdge: edge)
@@ -37,14 +39,17 @@ final class MeetingSharer: NSObject, @preconcurrency NSSharingServicePickerDeleg
 
     func sharingServicePicker(_ picker: NSSharingServicePicker, sharingServicesForItems items: [Any],
                               proposedSharingServices proposed: [NSSharingService]) -> [NSSharingService] {
-        guard MailComposer.isDefaultMailApp, let meeting,
-              let mailTitle = NSSharingService(named: .composeEmail)?.title,
-              let index = proposed.firstIndex(where: { $0.title == mailTitle })
-        else { return proposed }
         var services = proposed
-        let mail = proposed[index]
-        services[index] = NSSharingService(title: mail.title, image: mail.image, alternateImage: mail.alternateImage) {
-            MainActor.assumeIsolated { MailComposer.compose(meeting) }
+        if MailComposer.isDefaultMailApp, let meeting,
+           let mailTitle = NSSharingService(named: .composeEmail)?.title,
+           let index = proposed.firstIndex(where: { $0.title == mailTitle }) {
+            let mail = proposed[index]
+            services[index] = NSSharingService(title: mail.title, image: mail.image, alternateImage: mail.alternateImage) {
+                MainActor.assumeIsolated { MailComposer.compose(meeting) }
+            }
+        }
+        if let page, let whatsApp = WhatsAppSharer.service(for: page), !proposed.contains(where: { $0.title == whatsApp.title }) {
+            services.append(whatsApp)
         }
         return services
     }
@@ -101,6 +106,38 @@ enum MailComposer {
 
     static func appleScriptString(_ text: String) -> String {
         "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+}
+
+/// WhatsApp for Mac has no share extension and opens only images, so it never shows in the share
+/// menu by itself. This puts the meeting's page on the clipboard as a file and opens WhatsApp:
+/// pasted into a chat, it's sent as a document. On a Mac with tinyMuesli, opening it offers to add
+/// the meeting.
+@MainActor
+enum WhatsAppSharer {
+    static let bundleID = "net.whatsapp.WhatsApp"
+
+    /// The share menu item, if WhatsApp is installed.
+    static func service(for page: URL) -> NSSharingService? {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let icon = NSWorkspace.shared.icon(forFile: app.path)
+        return NSSharingService(title: "WhatsApp", image: icon, alternateImage: nil) {
+            MainActor.assumeIsolated { share(page, app: app) }
+        }
+    }
+
+    static func share(_ page: URL, app: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([page as NSURL])
+        let alert = NSAlert()
+        alert.messageText = "Paste the Meeting into a WhatsApp Chat"
+        alert.informativeText = "The meeting’s page is copied. In WhatsApp, open the chat and paste it (⌘V) to send it. "
+            + "Anyone can open it to read the transcript, and with tinyMuesli on their Mac, opening it offers to add the meeting."
+        alert.addButton(withTitle: "Open WhatsApp")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
     }
 }
 

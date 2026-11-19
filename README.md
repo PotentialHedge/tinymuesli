@@ -103,8 +103,10 @@ both.
 **Share** in the Meetings window's toolbar (or right-click a meeting: Share, Save as Web Page…)
 sends a finished meeting as a single web page (by email through Apple Mail, as the email itself, in
 the same chat bubbles; the first time, macOS asks to let tinyMuesli control Mail). It shows the transcript as a chat and opens in any
-browser, so the recipient doesn't need tinyMuesli. If they have it, **Add to tinyMuesli** on the page
-adds the meeting to their meetings, after asking, marked with who shared it. The meeting travels inside the page's link, so
+browser, so the recipient doesn't need tinyMuesli. If they have it, **Add to your tinyMuesli** on the page
+adds the meeting to their meetings, after asking, marked with who shared it; on a Mac, opening the page offers that straight
+away, and its **Get tinyMuesli** button opens the meeting in tinyMuesli when it's installed. **WhatsApp** in the Share menu
+copies the page to paste into a chat (WhatsApp for Mac can't be shared to directly). The meeting travels inside the page's link, so
 nothing is uploaded anywhere. The page holds only the transcript: title, tags, times and who said
 what. Audio and voice prints stay on your Mac. "Me" is shown as your macOS account's full name.
 

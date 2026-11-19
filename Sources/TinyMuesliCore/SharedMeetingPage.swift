@@ -75,8 +75,9 @@ extension SharedMeeting {
           <p class="details">\(Self.escape((details + [speakers.joined(separator: ", ")]).filter { !$0.isEmpty }.joined(separator: " · ")))</p>
           \(tagList)
           <div class="add">
-            <a class="button" id="add" href="\(importLink)">Add to tinyMuesli</a>
-            <p class="mac">Shared by \(Self.escape(sharedBy)). With tinyMuesli on your Mac, add the meeting to search it and ask your AI assistant about it.</p>
+            <a class="button" id="add" href="\(importLink)">Add to your tinyMuesli</a>
+            <p class="mac">Shared by \(Self.escape(sharedBy)). With tinyMuesli on your Mac, opening this page offers to add the meeting, to search it and ask your AI assistant about it.</p>
+            <p class="phone">To add to your tinyMuesli, download the file and open it on your Mac.</p>
             <p class="missing">Nothing happened? You may not have tinyMuesli yet. <a href="\(Self.website)">Get it free</a>, then open this page again.</p>
           </div>
           <p class="shared">Shared by \(Self.escape(sharedBy))</p>
@@ -86,7 +87,7 @@ extension SharedMeeting {
         <footer>
           <p class="brand">tiny<span>Muesli</span></p>
           <p>Takes notes in your meetings: it notices when a call starts, transcribes it and works out who said what, all on your Mac. Audio never leaves it, and every meeting is plain files you own. Free and open source.</p>
-          <a class="button" href="\(Self.website)">Get tinyMuesli for Mac</a>
+          <a class="button" id="get" href="\(Self.website)" data-open="\(importLink)">Get tinyMuesli for Mac</a>
         </footer>
         <script>\(Self.script)</script>
         </body>
@@ -143,7 +144,7 @@ extension SharedMeeting {
         <div style="\(secondary)font-size:13px">\(Self.escape(facts))</div>
         <div style="\(secondary)font-size:13px">\(Self.escape(speakers.joined(separator: ", ")))</div>
         \(tagLine)
-        <div style="margin-top:12px"><a href="\(importLink)" style="display:inline-block;background:#0a84ff;color:#ffffff;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:600;text-decoration:none">Add to tinyMuesli</a></div>
+        <div style="margin-top:12px"><a href="\(importLink)" style="display:inline-block;background:#0a84ff;color:#ffffff;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:600;text-decoration:none">Add to your tinyMuesli</a></div>
         <div style="\(secondary)font-size:12px;margin-top:8px">With tinyMuesli on your Mac, the button adds this meeting to your meetings, to search it and ask your AI assistant about it.</div>
         </div>
         \(chat.isEmpty ? "<div style=\"\(secondary)\">Nobody said anything in this meeting.</div>" : chat)
@@ -208,7 +209,9 @@ extension SharedMeeting {
     .add p { margin: .6rem 0 0; color: var(--muted); font-size: 12px; }
     .add .missing { display: none; }
     .maybe-missing .add .missing { display: block; }
-    .not-mac .add { display: none; }
+    .add .phone { display: none; }
+    .not-mac .add .button, .not-mac .add .mac { display: none; }
+    .not-mac .add .phone { display: block; margin-top: 0; }
     .button { display: inline-block; padding: 8px 18px; border-radius: 999px; font-weight: 600; font-size: 14px;
               text-decoration: none; background: var(--blue); color: #fff; }
     a { color: var(--blue); }
@@ -231,8 +234,12 @@ extension SharedMeeting {
     @media print { .add, footer .button, .at { display: none; } .shared { display: block; } }
     """
 
-    /// Dates in the reader's own time zone and format; hides the button where it can't work, and
-    /// says what's missing if clicking it seems to do nothing.
+    /// Dates in the reader's own time zone and format; hides the button where it can't work. On a
+    /// Mac it opens the import link straight away, so with tinyMuesli the meeting is offered for adding
+    /// as soon as the page is opened (tinyMuesli asks first, and one added before is just shown). The
+    /// button stays for when the browser asks first or that was dismissed. If nothing seems to happen,
+    /// it says what's missing. "Get tinyMuesli" also tries tinyMuesli first, and goes to the website
+    /// only if nothing opened.
     static let script = """
     (function () {
       var full = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" });
@@ -244,12 +251,26 @@ extension SharedMeeting {
       var mac = /Macintosh|Mac OS X/.test(navigator.userAgent) && !("ontouchend" in document);
       if (!mac) document.body.classList.add("not-mac");
       var add = document.getElementById("add");
-      if (add) add.addEventListener("click", function () {
+      if (!add) return;
+      function watch() {
         var left = false;
         function away() { left = true; }
         window.addEventListener("blur", away, { once: true });
         document.addEventListener("visibilitychange", away, { once: true });
         setTimeout(function () { if (!left) document.body.classList.add("maybe-missing"); }, 2500);
+      }
+      add.addEventListener("click", watch);
+      if (mac) setTimeout(function () { watch(); window.location.href = add.href; }, 400);
+      // "Get tinyMuesli": with it installed, open the meeting in it instead; else go to the website.
+      var get = document.getElementById("get");
+      if (mac && get) get.addEventListener("click", function (event) {
+        event.preventDefault();
+        var left = false;
+        function away() { left = true; }
+        window.addEventListener("blur", away, { once: true });
+        document.addEventListener("visibilitychange", away, { once: true });
+        window.location.href = get.dataset.open;
+        setTimeout(function () { if (!left) window.location.href = get.href; }, 1500);
       });
     })();
     """
